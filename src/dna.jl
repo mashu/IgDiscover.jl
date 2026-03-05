@@ -1,0 +1,143 @@
+# DNA sequence utilities — pure functions, no state
+
+const GENETIC_CODE = Dict{String, Char}(
+    "TTT" => 'F', "TTC" => 'F', "TTA" => 'L', "TTG" => 'L',
+    "CTT" => 'L', "CTC" => 'L', "CTA" => 'L', "CTG" => 'L',
+    "ATT" => 'I', "ATC" => 'I', "ATA" => 'I', "ATG" => 'M',
+    "GTT" => 'V', "GTC" => 'V', "GTA" => 'V', "GTG" => 'V',
+    "TCT" => 'S', "TCC" => 'S', "TCA" => 'S', "TCG" => 'S',
+    "CCT" => 'P', "CCC" => 'P', "CCA" => 'P', "CCG" => 'P',
+    "ACT" => 'T', "ACC" => 'T', "ACA" => 'T', "ACG" => 'T',
+    "GCT" => 'A', "GCC" => 'A', "GCA" => 'A', "GCG" => 'A',
+    "TAT" => 'Y', "TAC" => 'Y', "TAA" => '*', "TAG" => '*',
+    "CAT" => 'H', "CAC" => 'H', "CAA" => 'Q', "CAG" => 'Q',
+    "AAT" => 'N', "AAC" => 'N', "AAA" => 'K', "AAG" => 'K',
+    "GAT" => 'D', "GAC" => 'D', "GAA" => 'E', "GAG" => 'E',
+    "TGT" => 'C', "TGC" => 'C', "TGA" => '*', "TGG" => 'W',
+    "CGT" => 'R', "CGC" => 'R', "CGA" => 'R', "CGG" => 'R',
+    "AGT" => 'S', "AGC" => 'S', "AGA" => 'R', "AGG" => 'R',
+    "GGT" => 'G', "GGC" => 'G', "GGA" => 'G', "GGG" => 'G',
+)
+
+const COMPLEMENT_MAP = Dict{Char,Char}(
+    'A' => 'T', 'T' => 'A', 'C' => 'G', 'G' => 'C', 'N' => 'N',
+    'a' => 't', 't' => 'a', 'c' => 'g', 'g' => 'c', 'n' => 'n',
+)
+
+"""
+    translate(seq::AbstractString) -> String
+
+Translate nucleotide sequence to amino acids. Unknown codons become '*'.
+"""
+function translate(seq::AbstractString)
+    n = ncodeunits(seq) ÷ 3
+    buf = IOBuffer(; sizehint = n)
+    for i in 1:n
+        codon = uppercase(SubString(seq, 3(i-1)+1, 3i))
+        write(buf, get(GENETIC_CODE, codon, '*'))
+    end
+    String(take!(buf))
+end
+
+"""
+    reverse_complement(seq::AbstractString) -> String
+
+Return the reverse complement of a DNA sequence.
+"""
+function reverse_complement(seq::AbstractString)
+    String([get(COMPLEMENT_MAP, c, 'N') for c in Iterators.reverse(seq)])
+end
+
+"""
+    has_stop(seq::AbstractString) -> Bool
+
+Check whether sequence contains an internal stop codon. Incomplete trailing codon allowed.
+"""
+function has_stop(seq::AbstractString)
+    n = ncodeunits(seq) ÷ 3
+    n == 0 && return false
+    occursin('*', translate(SubString(seq, 1, 3n)))
+end
+
+"""
+    edit_distance(s::AbstractString, t::AbstractString; maxdiff::Int=typemax(Int)) -> Int
+
+Levenshtein distance with optional early termination at maxdiff+1.
+"""
+function edit_distance(s::AbstractString, t::AbstractString; maxdiff::Int = typemax(Int))
+    # Work with codeunit vectors for DNA (ASCII-safe, avoids Unicode indexing overhead)
+    sv = codeunits(s)
+    tv = codeunits(t)
+    m, n = length(sv), length(tv)
+    unbounded = (maxdiff == typemax(Int))
+    if !unbounded && abs(m - n) > maxdiff
+        return maxdiff + 1
+    end
+
+    prev = collect(0:n)
+    curr = Vector{Int}(undef, n + 1)
+
+    for i in 1:m
+        curr[1] = i
+        row_min = i
+        for j in 1:n
+            cost = sv[i] == tv[j] ? 0 : 1
+            curr[j+1] = min(curr[j] + 1, prev[j+1] + 1, prev[j] + cost)
+            row_min = min(row_min, curr[j+1])
+        end
+        if !unbounded && row_min > maxdiff
+            return maxdiff + 1
+        end
+        prev, curr = curr, prev
+    end
+    unbounded ? prev[n+1] : min(prev[n+1], maxdiff + 1)
+end
+
+"""
+    hamming_distance(s::AbstractString, t::AbstractString) -> Int
+
+Hamming distance between two equal-length strings.
+"""
+function hamming_distance(s::AbstractString, t::AbstractString)
+    sv, tv = codeunits(s), codeunits(t)
+    length(sv) == length(tv) || error("Strings must have equal length for Hamming distance")
+    count(i -> sv[i] != tv[i], eachindex(sv))
+end
+
+"""
+    sequence_hash(seq::AbstractString; digits::Int=4) -> String
+
+Fingerprint like "S1234" derived from sequence content.
+"""
+function sequence_hash(seq::AbstractString; digits::Int = 4)
+    h = bytes2hex(sha256(Vector{UInt8}(codeunits(seq))))
+    n = parse(UInt64, h[end-3:end]; base = 16)
+    "S" * lpad(string(n % 10^digits), digits, '0')
+end
+
+"""
+    unique_name(name::AbstractString, seq::AbstractString) -> String
+
+Gene name with sequence-derived suffix. Strips existing `_S....` suffix first.
+"""
+function unique_name(name::AbstractString, seq::AbstractString)
+    base = first(split(name, "_S"; limit = 2))
+    base * "_" * sequence_hash(seq)
+end
+
+"""
+    safe_divide(x, y) -> Float64
+
+x/y, returning 0.0 when y is zero.
+"""
+safe_divide(x, y) = y == 0 ? 0.0 : Float64(x) / Float64(y)
+
+"""
+    is_same_gene(name1, name2) -> Bool
+
+Check whether two gene names are alleles of the same gene (share prefix before '*').
+"""
+function is_same_gene(name1::AbstractString, name2::AbstractString)
+    occursin('*', name1) && occursin('*', name2) &&
+        first(split(name1, '*')) == first(split(name2, '*'))
+end

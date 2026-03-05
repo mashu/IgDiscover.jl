@@ -1,0 +1,58 @@
+# IgDiscover.jl default configuration
+# This file documents all available settings and their defaults.
+
+species = ""                      # e.g. "human", "rhesus", "mouse"
+sequence_type = "Ig"              # "Ig" or "TCR"
+merge_program = "pear"            # "pear" or "flash"
+flash_maximum_overlap = 300
+limit = 0                         # 0 means no limit; otherwise subsample reads to this count
+multialign_program = "muscle-fast"
+minimum_merged_read_length = 300
+mismatch_penalty = 0              # 0 means use IgBLAST default
+barcode_length = 0
+barcode_consensus = true
+iterations = 1
+ignore_j = false
+d_coverage = 70
+subsample = 1000
+stranded = false
+rename = false
+race_g = false
+seed = 1
+exact_copies = 0                  # 0 means not set; otherwise minimum exact copies
+
+[preprocessing_filter]
+v_coverage = 90.0
+j_coverage = 60.0
+v_evalue = 1e-3
+
+[pre_germline_filter]
+unique_cdr3s = 2
+unique_js = 2
+whitelist = true
+cluster_size = 0
+allow_stop = true
+cross_mapping_ratio = 0.02
+clonotype_ratio = 0.12
+exact_ratio = 0.12
+cdr3_shared_ratio = 0.8
+unique_d_ratio = 0.3
+unique_d_threshold = 10
+
+[germline_filter]
+unique_cdr3s = 5
+unique_js = 3
+whitelist = true
+cluster_size = 50
+allow_stop = false
+cross_mapping_ratio = 0.02
+clonotype_ratio = 0.12
+exact_ratio = 0.12
+cdr3_shared_ratio = 0.8
+unique_d_ratio = 0.3
+unique_d_threshold = 10
+
+[j_discovery]
+allele_ratio = 0.2
+cross_mapping_ratio = 0.1
+propagate = true
