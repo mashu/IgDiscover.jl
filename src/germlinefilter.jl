@@ -21,8 +21,8 @@ end
 """
     should_discard(filter, ref, candidate, same_gene) -> String
 
-Return a non-empty reason string if `candidate` should be discarded relative to `ref`;
-return "" to keep it. Dispatches on the concrete filter type.
+Return a non-empty reason if `candidate` should be discarded relative to `ref`.
+Dispatches on the concrete filter type.
 """
 function should_discard end
 
@@ -45,7 +45,6 @@ end
 
 function should_discard(f::CrossMappingFilter, ref::FilterCandidate,
                         cand::FilterCandidate, ::Bool)
-    # Compare V sequences up to CDR3 start only
     s = SubString(ref.sequence,  1, min(ref.cdr3_start,  length(ref.sequence)))
     t = SubString(cand.sequence, 1, min(cand.cdr3_start, length(cand.sequence)))
 
@@ -128,8 +127,6 @@ end
     germline_filter!(candidates, criteria; whitelist) -> (filtered_df, annotated_df)
 
 Apply per-entry and pairwise germline filters to V gene candidates.
-Returns `(filtered, annotated)` where `filtered` has the `is_filtered`/`why_filtered`
-columns removed and `annotated` retains them for debugging.
 """
 function germline_filter!(
     candidates::DataFrame,
@@ -172,7 +169,7 @@ function germline_filter!(
     criteria.exact_ratio         > 0 && push!(filters, ExactRatioFilter(criteria.exact_ratio))
     criteria.unique_d_ratio      > 0 && push!(filters, UniqueDRatioFilter(criteria.unique_d_ratio, criteria.unique_d_threshold))
 
-    # Build FilterCandidate snapshot vector
+    # Build FilterCandidate snapshots
     fc = [FilterCandidate(
         candidates.consensus[i], candidates.name[i],
         candidates.clonotypes[i], candidates.exact[i], candidates.Ds_exact[i],

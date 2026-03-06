@@ -74,8 +74,7 @@ function query_position(
     -1
 end
 
-# Build a short_id → full_name mapping for IMGT-style headers (accession|allele|...).
-# IgBLAST strips the % prefix and uses accession_allele as the sequence id.
+# Build a short_id → full_name mapping for IMGT-style headers
 function build_short_id_map(db::Dict{String,String})
     out = Dict{String,String}()
     for name in keys(db)
@@ -92,8 +91,7 @@ end
 """
     augment_table(airr_df, database_dir; sequence_type) -> DataFrame
 
-Add IgDiscover-specific columns to an AIRR-format IgBLAST table:
-count, barcode, V_SHM, J_SHM, V/D/J_errors, V/D/J_covered, V_CDR3_start, cdr3, cdr3_aa, V_nt.
+Add IgDiscover-specific columns to an AIRR-format IgBLAST table.
 """
 function augment_table(
     airr_df::DataFrame,
@@ -108,7 +106,7 @@ function augment_table(
     short_d = build_short_id_map(db_d)
     short_j = build_short_id_map(db_j)
 
-    # Precompute CDR3 anchor positions for all loci
+    # Precompute CDR3 anchor positions
     loci = ("IGH", "IGK", "IGL", "TRA", "TRB", "TRG", "TRD")
     v_cdr3_starts = Dict(locus => Dict{String,Int}() for locus in loci)
     j_cdr3_ends   = Dict(locus => Dict{String,Int}() for locus in loci)
@@ -126,13 +124,13 @@ function augment_table(
     n = nrow(airr_df)
     result = copy(airr_df)
 
-    # Strip % prefix from gene calls (added by makeblastdb)
+    # Strip % prefix from gene calls
     for col in (:v_call, :d_call, :j_call)
         hasproperty(result, col) || continue
         result[!, col] = [lstrip(coalesce(v, ""), '%') for v in result[!, col]]
     end
 
-    # Parse sequence_id headers for count and barcode
+    # Parse headers for count and barcode
     counts   = zeros(Int, n)
     barcodes = fill("", n)
     for i in 1:n
@@ -158,7 +156,7 @@ function augment_table(
     result.J_errors = [count_alignment_errors(
         col_str(result, :j_germline_alignment, i), col_str(result, :j_sequence_alignment, i)) for i in 1:n]
 
-    # Gene coverage (fraction of database gene covered by alignment)
+    # Gene coverage
     resolve_v(vc) = get(short_v, vc, vc)
     resolve_d(dc) = get(short_d, dc, dc)
     resolve_j(jc) = get(short_j, jc, jc)
@@ -173,7 +171,7 @@ function augment_table(
         col_str(result, :j_germline_alignment, i),
         get(db_j, resolve_j(col_str(result, :j_call, i)), "") |> length) for i in 1:n]
 
-    # Ensure CDR3/stop columns exist and are mutable String vectors
+    # Ensure CDR3/stop columns exist as mutable String vectors
     for col in (:cdr3, :cdr3_aa)
         hasproperty(result, col) || (result[!, col] = fill("", n))
         result[!, col] = Vector{String}(coalesce.(result[!, col], ""))
@@ -195,7 +193,6 @@ function augment_table(
         vc_full = resolve_v(vc)
         jc_full = resolve_j(jc)
 
-        # CDR3 start from V gene reference
         cdr3_ref_start = get(get(v_cdr3_starts, locus, Dict{String,Int}()), vc_full, 0)
         cdr3_ref_start == 0 && continue
 
@@ -209,12 +206,10 @@ function augment_table(
 
         cdr3_query_start = query_position(v_gs, v_ss, v_galn, v_saln, cdr3_ref_start)
         if cdr3_query_start < 0
-            # Rescue: assume the alignment continues without indels past the end
             cdr3_query_start = v_se + (cdr3_ref_start - v_ge)
         end
         result.V_CDR3_start[i] = cdr3_query_start - v_ss + 1
 
-        # CDR3 end from J gene reference
         cdr3_ref_end = get(get(j_cdr3_ends, locus, Dict{String,Int}()), jc_full, 0)
         cdr3_ref_end == 0 && continue
 
@@ -241,7 +236,7 @@ function augment_table(
         replace.(coalesce.(result.v_sequence_alignment, ""), "-" => "") :
         fill("", n)
 
-    # d_support: D-gene e-value (Inf = absent)
+    # d_support: D-gene e-value
     hasproperty(result, :d_support) || (result.d_support = fill(Inf, n))
 
     # Normalize stop_codon to "T"/"F"

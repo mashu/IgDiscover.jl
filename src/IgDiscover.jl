@@ -28,6 +28,7 @@ include("tablefilter.jl")
 include("discovery.jl")
 include("jdiscovery.jl")
 include("germlinefilter.jl")
+include("rename.jl")
 include("pipeline.jl")
 
 export Config, load_config, write_default_config
@@ -41,6 +42,7 @@ export filter_table, FilterStats
 export discover_germline
 export discover_j_genes, discover_j_to_fasta
 export germline_filter!, germline_filter_to_fasta, Whitelist
+export rename_genes
 export init_analysis, run_pipeline
 export group_reads
 

@@ -2,13 +2,7 @@
 # run_parity_test.jl — Compare Python igdiscover and Julia IgDiscover.jl outputs
 #
 # Usage:
-#   julia --project=. scripts/run_parity_test.jl /path/to/python/analysis_dir /path/to/julia/analysis_dir
-#
-# Both directories should have been run on the same input data.
-# The script compares:
-#   1. filtered.tsv.gz — row count, column names, key column values
-#   2. new_V_germline.tab — consensus sequences, candidate names
-#   3. new_V_germline.fasta — exact sequence content
+#   julia --project=. test/run_parity_test.jl /path/to/python/analysis_dir /path/to/julia/analysis_dir
 
 using IgDiscover
 using DataFrames
@@ -18,7 +12,6 @@ using CSV
 function compare_filtered(py_dir, jl_dir)
     println("\n══════ Comparing filtered.tsv.gz ══════")
 
-    # Find filtered files in last iteration or final
     py_path = find_filtered(py_dir)
     jl_path = find_filtered(jl_dir)
 
@@ -33,7 +26,6 @@ function compare_filtered(py_dir, jl_dir)
 
     passed = true
 
-    # Row count
     if nrow(py_df) == nrow(jl_df)
         println("  ✓ Row count matches: $(nrow(py_df))")
     else
@@ -41,7 +33,6 @@ function compare_filtered(py_dir, jl_dir)
         passed = false
     end
 
-    # Compare key columns
     shared_cols = intersect(propertynames(py_df), propertynames(jl_df))
     println("  Shared columns: $(length(shared_cols))/$(ncol(py_df)) Python, $(length(shared_cols))/$(ncol(jl_df)) Julia")
 
@@ -50,7 +41,6 @@ function compare_filtered(py_dir, jl_dir)
     isempty(py_only) || println("  Python-only columns: $(join(py_only, ", "))")
     isempty(jl_only) || println("  Julia-only columns: $(join(jl_only, ", "))")
 
-    # Compare v_call distribution
     if :v_call in shared_cols && nrow(py_df) == nrow(jl_df)
         py_vcounts = sort(collect(IgDiscover.tallies(py_df.v_call)); by = first)
         jl_vcounts = sort(collect(IgDiscover.tallies(jl_df.v_call)); by = first)
@@ -75,7 +65,6 @@ function compare_germline(py_dir, jl_dir)
 
     passed = true
 
-    # Compare tab files
     if py_tab !== nothing && jl_tab !== nothing
         py_df = CSV.read(py_tab, DataFrame; delim = '\t')
         jl_df = CSV.read(jl_tab, DataFrame; delim = '\t')
@@ -90,7 +79,6 @@ function compare_germline(py_dir, jl_dir)
             passed = false
         end
 
-        # Compare consensus sequences
         py_seqs = sort(py_df.consensus)
         jl_seqs = sort(jl_df.consensus)
         if py_seqs == jl_seqs
@@ -108,7 +96,6 @@ function compare_germline(py_dir, jl_dir)
         passed = false
     end
 
-    # Compare FASTA files
     if py_fa !== nothing && jl_fa !== nothing
         py_records = read_fasta_dict(py_fa)
         jl_records = read_fasta_dict(jl_fa)
@@ -123,8 +110,6 @@ function compare_germline(py_dir, jl_dir)
 
     passed
 end
-
-# ─── File finders ───
 
 function find_filtered(dir)
     for candidate in [
@@ -156,11 +141,9 @@ function find_germline_fasta(dir)
     nothing
 end
 
-# ─── Main ───
-
 function main()
     if length(ARGS) != 2
-        println("Usage: julia --project=. scripts/run_parity_test.jl <python_dir> <julia_dir>")
+        println("Usage: julia --project=. test/run_parity_test.jl <python_dir> <julia_dir>")
         exit(1)
     end
 

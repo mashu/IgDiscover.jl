@@ -72,13 +72,16 @@ function edit_distance(s::AbstractString, t::AbstractString; maxdiff::Int=typema
     if !unbounded && abs(m - n) > maxdiff
         return maxdiff + 1
     end
+
     prev = collect(0:n)
     curr = Vector{Int}(undef, n + 1)
-    for i in 1:m
+
+    @inbounds for i in 1:m
         curr[1] = i
         row_min = i
+        si = sv[i]
         for j in 1:n
-            cost = sv[i] == tv[j] ? 0 : 1
+            cost = si == tv[j] ? 0 : 1
             curr[j+1] = min(curr[j] + 1, prev[j+1] + 1, prev[j] + cost)
             row_min = min(row_min, curr[j+1])
         end
@@ -98,7 +101,11 @@ Hamming distance between two equal-length strings.
 function hamming_distance(s::AbstractString, t::AbstractString)
     sv, tv = codeunits(s), codeunits(t)
     length(sv) == length(tv) || error("Strings must have equal length for Hamming distance")
-    count(i -> sv[i] != tv[i], eachindex(sv))
+    d = 0
+    @inbounds for i in eachindex(sv)
+        d += sv[i] != tv[i]
+    end
+    d
 end
 
 """

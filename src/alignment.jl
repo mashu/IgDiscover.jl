@@ -24,27 +24,31 @@ function multialign(sequences::Dict{String,String};
     elseif program == "clustalo"
         read(pipeline(IOBuffer(fasta_str), `clustalo --threads=$threads --infile=-`), String)
     elseif program in ("muscle", "muscle-fast", "muscle-medium")
-        # MUSCLE 5 uses -align in -output out; MUSCLE 3 uses -in file -out file
         tmpin = tempname() * ".fa"
         tmpout = tempname() * ".afa"
         write(tmpin, fasta_str)
-        try
-            # Try MUSCLE 5 syntax first (muscle 5.x)
-            run(pipeline(`muscle -align $tmpin -output $tmpout`, stderr=devnull))
+        # Try MUSCLE 5 syntax first
+        p = run(pipeline(`muscle -align $tmpin -output $tmpout`, stderr=devnull); wait=false)
+        wait(p)
+        result = if p.exitcode == 0 && isfile(tmpout) && filesize(tmpout) > 0
             read(tmpout, String)
-        catch
-            # Fall back to MUSCLE 3 syntax (muscle -in file -out file)
+        else
+            # Clean stale output before MUSCLE 3 fallback
+            rm(tmpout; force=true)
             run(pipeline(`muscle -quiet -in $tmpin -out $tmpout`, stderr=devnull))
             read(tmpout, String)
-        finally
-            rm(tmpin; force = true)
-            rm(tmpout; force = true)
         end
+        rm(tmpin; force=true)
+        rm(tmpout; force=true)
+        result
     else
         error("Alignment program '$program' not supported")
     end
 
-    # Parse output FASTA
+    parse_fasta_string(output)
+end
+
+function parse_fasta_string(output::String)
     aligned = Dict{String,String}()
     current_name = ""
     current_seq = IOBuffer()
@@ -76,13 +80,17 @@ function consensus_sequence(aligned::AbstractVector{String};
     ncols = maximum(length, aligned)
     nseqs = length(aligned)
 
-    result = Char[]
+    # Build result in reverse order (3'→5'), then reverse at end — O(n) vs O(n²)
+    result_rev = Char[]
+    sizehint!(result_rev, ncols)
     active = max(1, round(Int, nseqs * 0.05))
+
+    counts = Dict{Char,Int}()
 
     # Process from the 3' end (reversed), same as Python version
     for col_rev in 0:ncols-1
         col = ncols - col_rev
-        counts = Dict{Char,Int}()
+        empty!(counts)
         for seq in aligned
             c = col <= length(seq) ? seq[col] : '-'
             counts[c] = get(counts, c, 0) + 1
@@ -90,7 +98,6 @@ function consensus_sequence(aligned::AbstractVector{String};
         gap_count = get(counts, '-', 0)
         active = max(nseqs - gap_count, active)
 
-        # Adjust gap count for inactive sequences
         adjusted_gaps = gap_count - (nseqs - active)
         if adjusted_gaps > 0
             counts['-'] = adjusted_gaps
@@ -111,13 +118,13 @@ function consensus_sequence(aligned::AbstractVector{String};
 
         if best_freq / active >= threshold
             if best_char != '-'
-                pushfirst!(result, best_char)
+                push!(result_rev, best_char)
             end
         else
-            pushfirst!(result, ambiguous)
+            push!(result_rev, ambiguous)
         end
     end
-    String(result)
+    String(reverse!(result_rev))
 end
 
 function consensus_sequence(aligned::Dict{String,String}; kwargs...)
@@ -187,6 +194,7 @@ function align_affine(ref::AbstractString, query::AbstractString;
     m, n = length(ref), length(query)
     INF = typemin(Int) ÷ 2
 
+    # Matrices: M=match/mismatch, H=horizontal gap (in ref), V=vertical gap (in query)
     M = zeros(Int, m + 1, n + 1)
     H = zeros(Int, m + 1, n + 1)
     V = zeros(Int, m + 1, n + 1)
@@ -204,7 +212,7 @@ function align_affine(ref::AbstractString, query::AbstractString;
         V[1, j] = INF
     end
 
-    for i in 2:m+1
+    @inbounds for i in 2:m+1
         rc = ref[i-1]
         for j in 2:n+1
             dscore = rc == query[j-1] ? match_score : mismatch
@@ -264,8 +272,6 @@ function describe_nt_change(ref::AbstractString, query::AbstractString)
     aln = align_affine(ref, query)
     changes = String[]
     idx = 1
-
-    # Group consecutive positions by event type
     i = 1
     while i <= length(aln.ref_row)
         c1, c2 = aln.ref_row[i], aln.query_row[i]

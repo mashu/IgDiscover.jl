@@ -8,6 +8,7 @@ Julia port of [IgDiscover](https://gitlab.com/gkhlab/igdiscover22), a tool for a
 - **Same external tools**: IgBLAST, MUSCLE, PEAR — no reimplementation of bioinformatics tools
 - **Julia idioms**: multiple dispatch, concrete parametric types, functors, TOML config
 - **No anti-patterns**: zero `try/catch`, `Any`, `isa()`, `typeof()`, `_`-prefixed functions
+- **Performance**: thread-local buffers for hot-path edit distance, precomputed hash indices for exact-match lookups
 
 ## Installation
 
@@ -41,17 +42,6 @@ init_analysis("my_analysis",           # output directory
               "path/to/reads.fasta.gz") # merged reads
 ```
 
-This creates:
-```
-my_analysis/
-├── igdiscover.toml     # configuration (edit before running)
-├── database/
-│   ├── V.fasta
-│   ├── D.fasta
-│   └── J.fasta
-└── reads.fasta.gz
-```
-
 ### Edit Configuration
 
 ```toml
@@ -71,71 +61,35 @@ cluster_size = 50
 run_pipeline("my_analysis")
 ```
 
-**Exact files produced** (per iteration, e.g. `iteration-01/`):
+**Output files** (per iteration, e.g. `iteration-01/`):
 
 | File | Description |
 |------|-------------|
 | `airr.tsv.gz` | IgBLAST AIRR-format assignments |
-| `assigned.tsv.gz` | Augmented table (IgDiscover columns: V_covered, J_covered, cdr3, stop_codon normalized, etc.) |
-| `filtered.tsv.gz` | Rows passing preprocessing filter (V+J, no stop, evalue, coverage) |
+| `assigned.tsv.gz` | Augmented table with IgDiscover columns |
+| `filtered.tsv.gz` | Rows passing preprocessing filter |
 | `candidates.tab` | V gene candidates from discovery |
-| `new_V_pregermline.tab` | Candidates after pre-germline filter |
-| `new_V_pregermline.fasta` | FASTA of pre-germline sequences |
-| `annotated_V_pregermline.tab` | Annotated pre-germline table |
-| `new_V_germline.tab` | Candidates after germline filter |
+| `new_V_pregermline.fasta` | Pre-germline filtered sequences |
 | `new_V_germline.fasta` | **Final discovered V germline sequences** |
-| `annotated_V_germline.tab` | Annotated germline table |
-| `new_J.fasta` | J genes (copy or discovered) |
-| `stats/filtered.json` | Filter counts |
-
-The `final/` directory contains the same structure with the chosen V/J database and final assignments/filtered table.
-
-### Step-by-Step Usage
-
-```julia
-using IgDiscover
-
-# Load config
-config = load_config("igdiscover.toml")
-
-# Run IgBLAST
-run_igblast_on_fasta("database/", "reads.fasta.gz", "airr.tsv.gz";
-    species="human", sequence_type="Ig")
-
-# Augment with IgDiscover columns
-df = read_assignments("airr.tsv.gz")
-augmented = augment_table(df, "database/")
-write_table_gzipped("assigned.tsv.gz", augmented)
-
-# Filter
-filtered, stats = filter_table(augmented, config.preprocessing_filter)
-write_table_gzipped("filtered.tsv.gz", filtered)
-
-# Discover candidates
-database = read_fasta_dict("database/V.fasta")
-candidates = discover_germline(filtered, database, config)
-write_table("candidates.tab", candidates)
-
-# Germline filter
-filtered_candidates, annotated = germline_filter!(candidates, config.germline_filter)
-germline_filter_to_fasta(filtered_candidates, "new_V_germline.fasta")
-```
+| `new_J.fasta` | Discovered J genes |
 
 ## Architecture
 
 ```
 src/
 ├── IgDiscover.jl     # Module definition
-├── dna.jl            # DNA utilities (translate, edit_distance, etc.)
+├── dna.jl            # DNA utilities (translate, edit_distance with thread-local buffers)
 ├── config.jl         # TOML configuration with concrete types
 ├── io.jl             # FASTA/TSV I/O
 ├── cdr3.jl           # CDR3 detection (ported from species.py)
 ├── alignment.jl      # Multiple alignment, consensus, affine alignment
 ├── clustering.jl     # Hierarchical + single-linkage clustering
+├── group.jl          # PCR bias correction (UMI/barcode grouping)
 ├── igblast.jl        # IgBLAST wrapper (calls external igblastn)
 ├── augment.jl        # AIRR table augmentation with IgDiscover columns
-├── tablefilter.jl    # Preprocessing filter (V/J coverage, evalue)
+├── tablefilter.jl    # Preprocessing filter
 ├── discovery.jl      # V gene candidate discovery (core algorithm)
+├── jdiscovery.jl     # J gene candidate discovery
 ├── germlinefilter.jl # Germline/pre-germline filter (dispatch-based)
 └── pipeline.jl       # Full pipeline orchestration
 ```
@@ -148,18 +102,20 @@ abstract type CandidateFilter end
 struct CrossMappingFilter <: CandidateFilter ... end
 struct ExactRatioFilter <: CandidateFilter ... end
 
-# Each filter dispatches on its concrete type:
 should_discard(f::CrossMappingFilter, ref, cand, same_gene) = ...
 should_discard(f::ExactRatioFilter, ref, cand, same_gene) = ...
 ```
 
-**Configuration uses immutable concrete structs:**
+**Thread-local edit distance buffers (zero allocation in hot loops):**
 ```julia
-struct GermlineFilterCriteria
-    unique_cdr3s::Int
-    unique_js::Int
-    # ... all fields are concrete types
-end
+# Pre-allocated per-thread buffers avoid GC pressure during pairwise comparisons
+edit_distance("ACGT", "AGGT"; maxdiff=1)  # O(0) allocations
+```
+
+**Precomputed hash indices in discovery:**
+```julia
+# O(1) exact-match lookups instead of O(n) linear scans
+v_no_cdr3_index = Dict{String,Vector{Int}}()  # sequence → row indices
 ```
 
 ## Testing
@@ -171,14 +127,8 @@ Pkg.test("IgDiscover")
 
 ### Parity Testing
 
-To verify exact parity with Python igdiscover:
-
-1. Run Python igdiscover on test data (e.g., ERR1760498)
-2. Run Julia IgDiscover.jl on the same data
-3. Compare outputs:
-
 ```bash
-julia --project=. scripts/run_parity_test.jl /path/to/python/analysis /path/to/julia/analysis
+julia --project=. test/run_parity_test.jl /path/to/python/analysis /path/to/julia/analysis
 ```
 
 ## Roadmap
@@ -188,6 +138,8 @@ julia --project=. scripts/run_parity_test.jl /path/to/python/analysis /path/to/j
 - [x] Germline filter (new_V_germline.fasta)
 - [x] CDR3 detection from V/J reference
 - [x] TOML configuration
+- [x] Thread-local edit distance buffers
+- [x] Precomputed hash indices for discovery
 - [x] Parity test infrastructure
 - [ ] J gene discovery (discoverjd)
 - [ ] Clonotypes subcommand
@@ -196,8 +148,6 @@ julia --project=. scripts/run_parity_test.jl /path/to/python/analysis /path/to/j
 - [ ] SnoopCompile + PackageCompiler binary bundle
 
 ## Citation
-
-If you use IgDiscover, please cite:
 
 > Corcoran et al. *Production of individualized V gene databases reveals high levels of immunoglobulin genetic diversity.* Nature Communications 7:13642 (2016)
 

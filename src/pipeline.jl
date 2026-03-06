@@ -31,20 +31,26 @@ function run_pipeline(dir::AbstractString)
         @info "IgDiscover.jl — $(config.iterations) iteration(s)"
         config.limit > 0 && @info "Read limit: $(config.limit) (set limit=0 for full run)"
 
+        t_start = time()
         reads_path = find_reads()
 
         if config.barcode_length != 0
             @info "PCR bias correction active (barcode_length=$(config.barcode_length))"
             reads_path = group_reads(reads_path, "grouped.fasta.gz", config; limit=config.limit)
+        elseif config.race_g
+            # Trim leading G even without barcode grouping
+            reads_path = trim_reads_race_g(reads_path, "trimmed.fasta.gz"; limit=config.limit)
         end
 
         for iteration in 1:config.iterations
+            t_iter = time()
             @info "━━━ Iteration $iteration ━━━"
             run_iteration(config, @sprintf("iteration-%02d", iteration), reads_path, iteration)
+            @info @sprintf("Iteration %d completed in %.1f seconds", iteration, time() - t_iter)
         end
 
         run_final(config, reads_path)
-        @info "Pipeline complete"
+        @info @sprintf("Pipeline complete in %.1f seconds", time() - t_start)
     end
 end
 
@@ -74,52 +80,69 @@ function run_iteration(config::Config, iter_dir::String, reads_path::String, ite
     end
     cp(j_src, joinpath(iter_dir, "database", "J.fasta"); force=true)
 
-    db_dir       = joinpath(iter_dir, "database")
-    airr_path    = joinpath(iter_dir, "airr.tsv.gz")
+    db_dir        = joinpath(iter_dir, "database")
+    airr_path     = joinpath(iter_dir, "airr.tsv.gz")
     assigned_path = joinpath(iter_dir, "assigned.tsv.gz")
     filtered_path = joinpath(iter_dir, "filtered.tsv.gz")
     candidates_path = joinpath(iter_dir, "candidates.tab")
 
     # IgBLAST
     if !isfile(airr_path)
+        t = time()
         run_igblast_on_fasta(db_dir, reads_path, airr_path;
             sequence_type=config.sequence_type, species=config.species,
             penalty=config.mismatch_penalty, threads=Sys.CPU_THREADS,
             limit=config.limit)
+        @info @sprintf("IgBLAST: %.1fs", time() - t)
     end
 
     # Augment
     if !isfile(assigned_path)
+        t = time()
         @info "Augmenting..."
         augmented = augment_table(read_assignments(airr_path), db_dir;
             sequence_type=config.sequence_type)
         write_table_gz(assigned_path, augmented)
+        @info @sprintf("Augment: %.1fs", time() - t)
     end
 
     # Filter
     if !isfile(filtered_path)
+        t = time()
         filter_table(assigned_path, filtered_path, config.preprocessing_filter;
             stats_path=joinpath(iter_dir, "stats", "filtered.json"))
+        @info @sprintf("Filter: %.1fs", time() - t)
     end
 
     # Discover V candidates
     if !isfile(candidates_path)
+        t = time()
         table    = read_assignments(filtered_path)
         database = read_fasta_dict(joinpath(db_dir, "V.fasta"))
         write_table(candidates_path, discover_germline(table, database, config))
+        @info @sprintf("Discovery: %.1fs", time() - t)
     end
 
     # Germline filters
     run_germline_filters(config, iter_dir)
 
+    # Rename genes if configured
+    if config.rename
+        germline_fasta = joinpath(iter_dir, "new_V_germline.fasta")
+        if isfile(germline_fasta) && !isempty(read_fasta(germline_fasta))
+            renamed_path = joinpath(iter_dir, "new_V_germline_renamed.fasta")
+            rename_genes(germline_fasta, joinpath("database", "V.fasta"), renamed_path)
+            cp(renamed_path, germline_fasta; force=true)
+        end
+    end
+
     # J discovery (iteration 1 only)
     if iteration == 1
         j_out = joinpath(iter_dir, "new_J.fasta")
         if !isfile(j_out)
-            table     = read_assignments(filtered_path)
+            table      = read_assignments(filtered_path)
             j_database = read_fasta_dict(joinpath(db_dir, "J.fasta"))
             result = discover_j_to_fasta(table, j_database, config, j_out)
-            # Fall back to original J if discovery produced nothing
             if isempty(read_fasta(result))
                 @info "J discovery produced no candidates; keeping original J database"
                 cp(joinpath(db_dir, "J.fasta"), j_out; force=true)
@@ -161,7 +184,6 @@ function run_final(config::Config, reads_path::String)
 
     last_iter = @sprintf("iteration-%02d", max(config.iterations, 1))
 
-    # Choose V source: use discovered germline if non-empty, else fall back to initial DB
     germline_fasta = joinpath(last_iter, "new_V_germline.fasta")
     v_src = if isfile(germline_fasta) && !isempty(read_fasta(germline_fasta))
         germline_fasta
@@ -182,7 +204,7 @@ function run_final(config::Config, reads_path::String)
     assigned_path = joinpath(final_dir, "assigned.tsv.gz")
     filtered_path = joinpath(final_dir, "filtered.tsv.gz")
 
-    # Reuse iteration results if we fell back to the original V database
+    # Reuse iteration results if V database unchanged
     if v_src == joinpath("database", "V.fasta") && isfile(joinpath(last_iter, "airr.tsv.gz"))
         @info "Reusing iteration results for final (V unchanged)"
         for fname in ("airr.tsv.gz", "assigned.tsv.gz", "filtered.tsv.gz")

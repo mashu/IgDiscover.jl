@@ -1,6 +1,4 @@
 # IgBLAST wrapper — calls external igblastn and makeblastdb
-# Uses same external programs as Python igdiscover.
-# Consider IgBLAST.jl (https://github.com/mashu/IgBLAST.jl) for binary management.
 
 """
     make_blastdb(fasta_path, db_name; prefix="%")
@@ -12,19 +10,10 @@ function make_blastdb(fasta_path::AbstractString, db_name::AbstractString;
     records = read_fasta(fasta_path)
     isempty(records) && error("FASTA file $fasta_path is empty")
 
-    # Sanitize sequences for makeblastdb: only A,C,G,T,U,N allowed; IMGT gaps '.' etc. -> N
-    function sanitize_nucl(s::AbstractString)
-        buf = IOBuffer(sizehint = length(s))
-        for c in uppercase(s)
-            write(buf, c in "ACGTUN" ? c : 'N')
-        end
-        String(take!(buf))
-    end
     db_fasta = db_name * ".fasta"
     open(db_fasta, "w") do io
         for r in records
             parts = split(r.name, '|')
-            # Unique ID: accession_allele (IMGT has duplicate accessions across alleles)
             seq_id = length(parts) >= 2 ? join(parts[1:2], "_") : first(parts)
             println(io, ">", prefix, seq_id)
             println(io, sanitize_nucl(r.sequence))
@@ -32,6 +21,15 @@ function make_blastdb(fasta_path::AbstractString, db_name::AbstractString;
     end
     run(pipeline(`makeblastdb -parse_seqids -dbtype nucl -in $db_fasta -out $db_name`;
                  stdout=devnull, stderr=devnull))
+end
+
+# Only A,C,G,T,U,N allowed in BLAST databases; everything else → N
+function sanitize_nucl(s::AbstractString)
+    buf = IOBuffer(sizehint = length(s))
+    for c in uppercase(s)
+        write(buf, c in "ACGTUN" ? c : 'N')
+    end
+    String(take!(buf))
 end
 
 """
@@ -78,21 +76,17 @@ function run_igblast_impl(sequences::Vector{FastaRecord},
                          sequence_type::String, extra_args::Vector{String})
     sequence_type in ("Ig", "TCR") || error("sequence_type must be \"Ig\" or \"TCR\"")
 
-    # Build argument list
     args = String[]
     for gene in ("V", "D", "J")
         append!(args, ["-germline_db_$(gene)", joinpath(blastdb_dir, gene)])
     end
 
-    # Empty aux file suppresses warnings
     aux_path = tempname() * ".aux"
     touch(aux_path)
     append!(args, ["-auxiliary_data", aux_path])
     append!(args, extra_args)
 
-    if !isempty(species)
-        append!(args, ["-organism", species])
-    end
+    !isempty(species) && append!(args, ["-organism", species])
     append!(args, ["-ig_seqtype", sequence_type,
                    "-num_threads", "1",
                    "-domain_system", "imgt",
@@ -120,8 +114,7 @@ end
                         sequence_type, species, penalty, threads, limit, chunksize)
 
 Run IgBLAST on a FASTA file, write AIRR TSV (gzipped) output.
-Main entry point for the IgBLAST step of the pipeline.
-When `limit > 0`, only the first `limit` reads are processed (for testing).
+When `limit > 0`, only the first `limit` reads are processed.
 """
 function run_igblast_on_fasta(database_dir::AbstractString,
                              input_fasta::AbstractString,
@@ -144,7 +137,6 @@ function run_igblast_on_fasta(database_dir::AbstractString,
 
     results = Vector{String}(undef, length(chunks))
 
-    # Parallel execution via Threads
     Threads.@threads for idx in eachindex(chunks)
         results[idx] = if penalty > 0
             run_igblast_chunk(chunks[idx], blastdb_dir, penalty;
@@ -155,14 +147,22 @@ function run_igblast_on_fasta(database_dir::AbstractString,
         end
     end
 
-    # Combine: keep header from first, skip header in rest
+    # Combine: keep header from first chunk, strip header from subsequent chunks
     io = open(output_path, "w")
     stream = GzipCompressorStream(io)
     for (i, result) in enumerate(results)
-        for (j, line) in enumerate(eachline(IOBuffer(result)))
-            (i > 1 && j == 1) && continue  # skip header of subsequent chunks
-            isempty(line) && continue
-            println(stream, line)
+        if i == 1
+            # Write first chunk completely (includes header)
+            write(stream, result)
+            endswith(result, '\n') || write(stream, '\n')
+        else
+            # Skip first line (header) of subsequent chunks
+            first_nl = findfirst('\n', result)
+            first_nl === nothing && continue
+            remainder = SubString(result, first_nl + 1)
+            isempty(strip(remainder)) && continue
+            write(stream, remainder)
+            endswith(remainder, '\n') || write(stream, '\n')
         end
     end
     close(stream)

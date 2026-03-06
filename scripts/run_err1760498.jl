@@ -3,7 +3,6 @@
 #
 # Prerequisites: igblastn, makeblastdb, muscle, (optional) pear in PATH.
 # Downloads: IMGT human IGH V/D/J, ENA ERR1760498 FASTQ.
-# Converts R1 FASTQ to FASTA (or merged FASTQ if PEAR available), then runs pipeline.
 
 using Pkg
 Pkg.activate(joinpath(@__DIR__, ".."))
@@ -20,7 +19,7 @@ const DB_DIR = joinpath(DATA_DIR, "imgt_human_igh")
 const RUN_DIR = joinpath(DATA_DIR, "ERR1760498")
 const ANALYSIS_DIR = joinpath(DATA_DIR, "ERR1760498_analysis")
 
-function download(url::String, dest::String)
+function download_file(url::String, dest::String)
     if isfile(dest)
         @info "Already exists: $dest"
         return
@@ -44,7 +43,7 @@ function setup_database()
     for (src, dst) in [("IGHV.fasta", "V.fasta"), ("IGHD.fasta", "D.fasta"), ("IGHJ.fasta", "J.fasta")]
         dest = joinpath(DB_DIR, dst)
         if !isfile(dest)
-            download("$IMGT_BASE/$src", dest)
+            download_file("$IMGT_BASE/$src", dest)
         end
     end
     @info "Database: $DB_DIR"
@@ -72,8 +71,8 @@ function get_reads()
     mkpath(RUN_DIR)
     r1 = joinpath(RUN_DIR, "ERR1760498_1.fastq.gz")
     r2 = joinpath(RUN_DIR, "ERR1760498_2.fastq.gz")
-    download("$ENA_BASE/ERR1760498_1.fastq.gz", r1)
-    download("$ENA_BASE/ERR1760498_2.fastq.gz", r2)
+    download_file("$ENA_BASE/ERR1760498_1.fastq.gz", r1)
+    download_file("$ENA_BASE/ERR1760498_2.fastq.gz", r2)
 
     reads_fasta = joinpath(RUN_DIR, "reads.fasta.gz")
     if isfile(reads_fasta)
@@ -81,7 +80,6 @@ function get_reads()
         return reads_fasta
     end
 
-    # Prefer PEAR-merged then convert; else use R1 only
     merged = joinpath(RUN_DIR, "merged.fastq")
     if success(pipeline(`which pear`, devnull))
         nthreads = max(1, Sys.CPU_THREADS)
@@ -93,7 +91,6 @@ function get_reads()
         ))
         merged_fq = pear_out * ".assembled.fastq"
         isfile(merged_fq) || error("PEAR did not produce $merged_fq")
-        # Convert to FASTA and gzip
         fastq_to_fasta(merged_fq, reads_fasta[1:end-3])
         run(`gzip -f $(reads_fasta[1:end-3])`)
     else

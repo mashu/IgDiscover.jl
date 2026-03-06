@@ -154,23 +154,19 @@ using DataFrames
     end
 
     @testset "Query position mapping" begin
-        # No gaps: germline pos 3, starts at 1
         pos = IgDiscover.query_position(1, 1, "ATCG", "ATCG", 3)
         @test pos == 3
 
-        # Gap in germline alignment
         pos = IgDiscover.query_position(1, 1, "AT-CG", "ATXCG", 3)
         @test pos >= 3
     end
 
     @testset "Barcode extraction" begin
         rec = IgDiscover.FastaRecord("r1", "AAAAATCGATCG")
-        # 5' barcode of length 5
         bc, unbarcoded = IgDiscover.extract_barcode(rec, 5)
         @test bc == "AAAAA"
         @test unbarcoded.sequence == "TCGATCG"
 
-        # 3' barcode of length 4
         bc2, unbarcoded2 = IgDiscover.extract_barcode(rec, -4)
         @test bc2 == "ATCG"
         @test unbarcoded2.sequence == "AAAAATCG"
@@ -180,7 +176,7 @@ using DataFrames
         seq = "ATCGATCGATCGATCGATCG"  # length 20
         p = IgDiscover.pseudo_cdr3(seq, 15, 5)
         @test !isempty(p)
-        @test length(p) == 10  # positions 6..15 from end
+        @test length(p) == 10
     end
 
     @testset "Trim leading G" begin
@@ -194,11 +190,75 @@ using DataFrames
         j2 = IgDiscover.JCandidate("J1*02", "J1*02",  10,  5, 0.0, 0.0, "ATCGATCC")
         j3 = IgDiscover.JCandidate("J1*03", "J1*03",   1,  1, 0.0, 0.0, "ATCGATCA")
 
-        # Allele ratio = 0.2: j3 (ratio 0.01) should be filtered; j2 (ratio 0.1) also below 0.2
         filtered = IgDiscover.filter_j_alleles([j1, j2, j3], 0.2)
         @test j1 in filtered
-        # j2 has exact=10, best=100, ratio=0.1 < 0.2 → discarded
         @test !(j3 in filtered)
+    end
+
+    @testset "Edit distance thread safety" begin
+        results = Vector{Int}(undef, 100)
+        Threads.@threads for i in 1:100
+            results[i] = IgDiscover.edit_distance("ABCDEF", "XBCDEY")
+        end
+        @test all(==(2), results)
+    end
+
+    @testset "Tallies" begin
+        t = IgDiscover.tallies(["a", "b", "a", "c", "a"])
+        @test t["a"] == 3
+        @test t["b"] == 1
+        @test t["c"] == 1
+    end
+
+    @testset "Consensus sequence" begin
+        # Basic consensus
+        seqs = ["AAAA", "AABA", "AACA"]
+        cons = IgDiscover.consensus_sequence(seqs; threshold=0.5)
+        @test length(cons) == 4
+        @test cons[1] == 'A'
+
+        # Empty input
+        @test IgDiscover.consensus_sequence(String[]) == ""
+
+        # Single sequence
+        @test IgDiscover.consensus_sequence(["ATCG"]; threshold=0.5) == "ATCG"
+    end
+
+    @testset "Rename genes" begin
+        tmpdir = mktempdir()
+        db_path = joinpath(tmpdir, "db.fasta")
+        disc_path = joinpath(tmpdir, "disc.fasta")
+        out_path = joinpath(tmpdir, "out.fasta")
+
+        IgDiscover.write_fasta(db_path, [
+            IgDiscover.FastaRecord("IGHV1-2*01", "ATCGATCG"),
+            IgDiscover.FastaRecord("IGHV1-3*01", "GGCCGGCC"),
+        ])
+        IgDiscover.write_fasta(disc_path, [
+            IgDiscover.FastaRecord("IGHV1-2_S1234", "ATCGATCG"),
+            IgDiscover.FastaRecord("IGHV1-2_S5678", "ATCGATCA"),
+        ])
+
+        IgDiscover.rename_genes(disc_path, db_path, out_path)
+        result = IgDiscover.read_fasta(out_path)
+        @test length(result) == 2
+        @test any(r -> startswith(r.name, "IGHV1-2*"), result)
+        rm(tmpdir; recursive=true)
+    end
+
+    @testset "Trim leading G (race_g)" begin
+        @test IgDiscover.trim_leading_g("GGGAATCG") == "AATCG"
+        @test IgDiscover.trim_leading_g("AATCG")    == "AATCG"
+        @test IgDiscover.trim_leading_g("GGGG")      == ""
+    end
+
+    @testset "Distance matrix" begin
+        seqs = ["AAAA", "AABA", "AAAA"]
+        M, clusters = IgDiscover.cluster_sequences(seqs; minsize=1)
+        @test size(M) == (3, 3)
+        @test M[1, 1] == 0.0
+        @test M[1, 3] == 0.0  # identical sequences
+        @test M[1, 2] > 0.0
     end
 
 end

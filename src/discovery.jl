@@ -129,7 +129,6 @@ function sibling_consensus(gene::String, group::DataFrame, params::DiscoveryPara
         program="muscle-medium",
         threshold=params.consensus_threshold / 100,
         maximum_subsample_size=params.downsample)
-    # Prefer database sequence when consensus matches it exactly
     if haskey(params.database, gene)
         dbseq = params.database[gene]
         (startswith(cons, dbseq) || startswith(dbseq, cons)) && return dbseq
@@ -172,6 +171,18 @@ function discover_gene(gene::String, assignments::DataFrame, params::DiscoveryPa
     # V sequence up to (but not including) CDR3
     v_no_cdr3 = [cdr3_start_val > 0 && cdr3_start_val <= length(s) ?
                   s[1:cdr3_start_val] : s for s in assignments.V_nt]
+
+    # Precompute index: v_no_cdr3 sequence → row indices (for fast exact-match lookup)
+    v_no_cdr3_index = Dict{String,Vector{Int}}()
+    for (i, seq) in enumerate(v_no_cdr3)
+        push!(get!(v_no_cdr3_index, seq, Int[]), i)
+    end
+
+    # Precompute index: full V_nt → row indices
+    v_nt_index = Dict{String,Vector{Int}}()
+    for (i, seq) in enumerate(assignments.V_nt)
+        push!(get!(v_nt_index, seq, Int[]), i)
+    end
 
     # Collect sibling groups: (consensus_seq, label, row_indices)
     siblings = Tuple{String,String,Vector{Int}}[]
@@ -227,14 +238,13 @@ function discover_gene(gene::String, assignments::DataFrame, params::DiscoveryPa
         v_no_cdr3_seq = cdr3_start_val > 0 && cdr3_start_val <= length(seq) ?
             seq[1:cdr3_start_val] : seq
 
-        exact_idx    = findall(==(v_no_cdr3_seq), v_no_cdr3)
+        # Use precomputed index for O(1) exact-match lookup
+        exact_idx    = get(v_no_cdr3_index, v_no_cdr3_seq, Int[])
         sib_group    = assignments[sib_indices, :]
         exact_group  = assignments[exact_idx, :]
 
-        # "full exact" = exact match on entire V_nt (not just up to CDR3)
-        full_exact_idx = findall(==(seq), assignments.V_nt)
+        full_exact_idx = get(v_nt_index, seq, Int[])
 
-        # CDR3 counts with this gene's contribution subtracted from the global pool
         sib_cdr3   = tallies(filter(!isempty, String.(sib_group.cdr3)))
         other_cdr3 = copy(params.cdr3_counts)
         for (k, v) in sib_cdr3
@@ -317,7 +327,7 @@ function discover_germline(
     push!(windows, (0.0, 100.0))
 
     params = DiscoveryParams(
-        database, windows, true, 60.0, MAX_SUBSAMPLE,
+        database, windows, true, config.consensus_threshold, MAX_SUBSAMPLE,
         6, config.subsample, 0, max(config.exact_copies, 1),
         config.d_coverage, 1e-4, config.seed, cdr3_counts)
 

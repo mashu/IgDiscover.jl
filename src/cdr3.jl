@@ -29,7 +29,6 @@ function cdr3_start_in_v(nt::AbstractString, locus::AbstractString)
         else
             CDR3_START_TR
         end
-        # Search in the last 15 aa
         head_len = max(0, length(aa) - 15)
         tail = SubString(aa, head_len + 1)
         m = match(regex, tail)
@@ -49,18 +48,13 @@ function cdr3_start_heavy(aa::AbstractString)
     head_len = max(0, length(aa) - 15)
     tail = SubString(aa, head_len + 1)
 
-    # Primary regex: [FY][FHVWY]C followed by start of CDR3
     m = match(CDR3_START_VH, tail)
     if m === nothing
         m = match(CDR3_START_VH_ALT, tail)
     end
     m === nothing && return 0
 
-    # Find the start of the captured group (the CDR3 start residue)
-    # In the primary regex, CDR3 starts after the 'C' (3 chars from match start)
-    # We need the position of the capture group
     if length(m.captures) >= 1 && m.captures[1] !== nothing
-        # Capture group offset within the match
         cap_offset = m.offsets[1]
         return 3 * (head_len + cap_offset - 1)
     end
@@ -130,7 +124,6 @@ function find_cdr3(sequence::AbstractString, locus::AbstractString)
             m = match(CDR3_FIND_IGH_ALT, aa)
         end
         m === nothing && continue
-        # Find the 'cdr3' capture group
         idx = findfirst(==("cdr3"), [string(k) for k in keys(m)])
         if idx !== nothing
             start_aa = m.offsets[idx]

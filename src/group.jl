@@ -1,5 +1,4 @@
 # PCR bias correction: group by UMI (barcode) ± (pseudo-)CDR3, output one sequence per group
-# Mirrors IgDiscover22 group step
 
 const MIN_CONSENSUS_SEQUENCES = 3
 const GROUP_CONSENSUS_THRESHOLD = 0.501
@@ -9,13 +8,12 @@ const CDR3_LENGTH_TOLERANCE = 2
     extract_barcode(record, barcode_length) -> (barcode, unbarcoded_record)
 
 Extract barcode from sequence. Positive length = 5' barcode; negative = 3' barcode.
-Returns the barcode string and a record with the remaining sequence.
 """
 function extract_barcode(record::FastaRecord, barcode_length::Int)
     seq = record.sequence
     n = length(seq)
     abs_len = abs(barcode_length)
-    abs_len <= n || return (seq, record)  # too short; treat whole sequence as barcode
+    abs_len <= n || return (seq, record)
     if barcode_length > 0
         (seq[1:abs_len], FastaRecord(record.name, seq[abs_len+1:end]))
     else
@@ -37,7 +35,6 @@ end
     pseudo_cdr3(sequence, start_from_end, end_from_end) -> String
 
 Extract pseudo-CDR3 as a slice from the 3' end.
-Returns sequence[(len - start_from_end + 1):(len - end_from_end)].
 """
 function pseudo_cdr3(sequence::AbstractString, start_from_end::Int, end_from_end::Int)
     L = length(sequence)
@@ -49,9 +46,7 @@ end
 """
     cluster_by_cdr3(records_with_cdr3, length_tolerance) -> Vector of clusters
 
-Single-linkage clustering: link (pseudo-)CDR3s with Hamming distance ≤ 1 and
-sequence length difference ≤ length_tolerance.
-Each cluster is a Vector of (FastaRecord, cdr3_string) tuples.
+Single-linkage clustering: link CDR3s with Hamming distance ≤ 1, then split by read length.
 """
 function cluster_by_cdr3(
     records_with_cdr3::Vector{Tuple{FastaRecord,String}},
@@ -60,18 +55,15 @@ function cluster_by_cdr3(
     isempty(records_with_cdr3) && return Vector{Vector{Tuple{FastaRecord,String}}}()
     length(records_with_cdr3) == 1 && return [records_with_cdr3]
 
-    # Group records by CDR3 string
     cdr3_to_records = Dict{String,Vector{Tuple{FastaRecord,String}}}()
     for (rec, cdr3) in records_with_cdr3
         push!(get!(cdr3_to_records, cdr3, Tuple{FastaRecord,String}[]), (rec, cdr3))
     end
     unique_cdr3s = sort!(collect(keys(cdr3_to_records)))
 
-    # Single-linkage on CDR3s: link if same length and Hamming distance ≤ 1
     linked(s::String, t::String) = length(s) == length(t) && hamming_distance(s, t) <= 1
     cdr3_clusters = single_linkage(unique_cdr3s, linked)
 
-    # Within each CDR3 cluster, further split by read length (length jump > tolerance)
     out = Vector{Vector{Tuple{FastaRecord,String}}}()
     for cdr3_cluster in cdr3_clusters
         all_recs = reduce(vcat, cdr3_to_records[c] for c in cdr3_cluster)
@@ -92,11 +84,6 @@ function cluster_by_cdr3(
     out
 end
 
-"""
-    make_group_header(name, sequence, barcode, size, cdr3) -> FastaRecord
-
-Construct a FASTA record with IgDiscover group metadata in the header.
-"""
 function make_group_record(name::String, sequence::String, barcode::String, size::Int, cdr3::String)
     header = isempty(cdr3) ?
         "$name;barcode=$barcode;size=$size;" :
@@ -106,12 +93,8 @@ end
 
 """
     pick_group_representative(cluster, barcode, use_consensus, consensus_counter, group_by_cdr3)
-        -> FastaRecord
 
-Choose a representative sequence for a barcode group:
-- 1 sequence  → use it directly
-- 2 sequences → pick first
-- 3+          → compute consensus (if use_consensus and no ambiguous bases), else pick first
+Choose a representative: 1-2 sequences → pick first; 3+ → consensus if unambiguous.
 """
 function pick_group_representative(
     cluster::Vector{Tuple{FastaRecord,String}},
@@ -132,7 +115,6 @@ function pick_group_representative(
     cons = simple_consensus_for_group(seqs; threshold=GROUP_CONSENSUS_THRESHOLD)
 
     if occursin('N', cons)
-        # Consensus is ambiguous; fall back to first sequence
         rec = cluster[1][1]
         return make_group_record(first(split(rec.name, r"\s+")), rec.sequence, barcode, n, cdr3_label)
     end
@@ -141,12 +123,6 @@ function pick_group_representative(
     make_group_record("consensus$(consensus_counter[])", cons, barcode, n, cdr3_label)
 end
 
-"""
-    simple_consensus_for_group(sequences; threshold) -> String
-
-Column-wise majority consensus from unaligned sequences via MUSCLE alignment.
-May contain 'N' at ambiguous positions.
-"""
 function simple_consensus_for_group(sequences::Vector{String}; threshold::Float64=GROUP_CONSENSUS_THRESHOLD)
     isempty(sequences) && return ""
     length(sequences) == 1 && return sequences[1]
@@ -159,8 +135,6 @@ end
     group_reads(input_path, output_path, config; limit) -> String
 
 Group sequences by barcode (± pseudo/real CDR3) for PCR bias correction.
-When config.barcode_length == 0, returns input_path unchanged.
-Otherwise writes one representative per group to output_path and returns output_path.
 """
 function group_reads(
     input_path::AbstractString,
@@ -173,7 +147,6 @@ function group_reads(
     records = read_fasta(input_path; limit=limit)
     group_by_cdr3 = config.group_by_cdr3 in ("pseudo", "real")
 
-    # Partition reads by barcode
     barcode_groups = Dict{String,Vector{FastaRecord}}()
     too_short = 0
     for rec in records
@@ -191,8 +164,6 @@ function group_reads(
 
     for barcode in sort!(collect(keys(barcode_groups)))
         seqs = barcode_groups[barcode]
-        names = [first(split(r.name, r"\s+")) for r in seqs]
-        length(names) == length(unique(names)) || error("Duplicate sequence names in input")
 
         clusters = if !group_by_cdr3
             [[(r, "") for r in seqs]]
@@ -218,5 +189,28 @@ function group_reads(
 
     write_fasta_gz(output_path, out_records)
     @info "Grouping wrote $(length(out_records)) sequences to $output_path"
+    output_path
+end
+
+"""
+    trim_reads_race_g(input_path, output_path; limit) -> String
+
+Trim leading G nucleotides from reads (RACE protocol artifact).
+Used when race_g=true but barcode_length=0 (no grouping step).
+"""
+function trim_reads_race_g(
+    input_path::AbstractString,
+    output_path::AbstractString;
+    limit::Int=0,
+)
+    isfile(output_path) && return output_path
+
+    records = read_fasta(input_path; limit=limit)
+    trimmed = [FastaRecord(r.name, trim_leading_g(r.sequence)) for r in records]
+    # Remove empty sequences after trimming
+    filter!(r -> !isempty(r.sequence), trimmed)
+
+    write_fasta_gz(output_path, trimmed)
+    @info "Trimmed leading G from $(length(records)) reads → $(length(trimmed)) in $output_path"
     output_path
 end

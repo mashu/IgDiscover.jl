@@ -4,25 +4,37 @@
     distance_matrix(sequences; band=0.2) -> Matrix{Float64}
 
 Pairwise edit distance matrix with bandwidth limit for efficiency.
+Uses threading for the O(n²) unique-pair computation.
 """
 function distance_matrix(sequences::Vector{String}; band::Float64 = 0.2)
     n = length(sequences)
     maxdiff = isempty(sequences) ? 0 : maximum(s -> round(Int, length(s) * band), sequences)
 
-    # Pre-compute distances between unique sequences
+    # Deduplicate to avoid redundant comparisons
     unique_seqs = unique(sequences)
-    unique_dists = Dict{Tuple{String,String},Int}()
-    for i in eachindex(unique_seqs), j in (i+1):length(unique_seqs)
-        s, t = unique_seqs[i], unique_seqs[j]
-        d = min(maxdiff + 1, edit_distance(s, t; maxdiff = maxdiff))
-        unique_dists[(s, t)] = d
-        unique_dists[(t, s)] = d
+    nu = length(unique_seqs)
+
+    # Compute pairwise distances for unique sequences (threaded)
+    unique_dist_matrix = zeros(Int, nu, nu)
+    pairs = [(i, j) for i in 1:nu for j in (i+1):nu]
+    Threads.@threads for idx in eachindex(pairs)
+        i, j = pairs[idx]
+        d = min(maxdiff + 1, edit_distance(unique_seqs[i], unique_seqs[j]; maxdiff = maxdiff))
+        unique_dist_matrix[i, j] = d
+        unique_dist_matrix[j, i] = d
+    end
+
+    # Map unique sequences to indices for O(1) lookup
+    seq_to_uid = Dict{String,Int}()
+    for (i, s) in enumerate(unique_seqs)
+        seq_to_uid[s] = i
     end
 
     M = zeros(Float64, n, n)
-    for i in 1:n, j in (i+1):n
-        s, t = sequences[i], sequences[j]
-        d = s == t ? 0.0 : Float64(get(unique_dists, (s, t), maxdiff + 1))
+    @inbounds for i in 1:n, j in (i+1):n
+        ui = seq_to_uid[sequences[i]]
+        uj = seq_to_uid[sequences[j]]
+        d = ui == uj ? 0.0 : Float64(unique_dist_matrix[ui, uj])
         M[i, j] = M[j, i] = d
     end
     M
@@ -33,20 +45,13 @@ end
 
 Hierarchical clustering with the igdiscover distance-ratio heuristic.
 Returns (distance_matrix, cluster_ids) where cluster_id=0 means unassigned.
-
-The heuristic: walk inner nodes from highest to lowest distance.
-When the ratio prev_dist/current_dist drops below 0.8, and both
-subtrees have >= minsize leaves, assign the left subtree a cluster id.
 """
 function cluster_sequences(sequences::Vector{String}; minsize::Int = 5)
     n = length(sequences)
     n == 0 && return (zeros(0, 0), Int[])
 
     M = distance_matrix(sequences)
-
-    # Clustering.jl hclust: takes a full distance matrix
     hcl = Clustering.hclust(M; linkage = :average, branchorder = :optimal)
-
     clusters = zeros(Int, n)
     assign_igdiscover_clusters!(clusters, hcl, n, minsize)
 
@@ -54,15 +59,10 @@ function cluster_sequences(sequences::Vector{String}; minsize::Int = 5)
 end
 
 """
-Assign cluster IDs from hierarchical clustering using igdiscover's heuristic.
+Assign cluster IDs using igdiscover's distance-ratio heuristic.
 
-Clustering.jl's Hclust stores:
-- merges: n-1 × 2 matrix. Negative values = leaf indices, positive = internal node indices.
-- heights: n-1 vector of merge distances.
-- order: leaf ordering.
-
-We walk the merge tree from highest distance to lowest (like igdiscover),
-splitting when the distance ratio drops below 0.8.
+Walk merge tree from highest to lowest distance. When ratio prev/current drops
+below 0.8 and both subtrees have >= minsize leaves, assign a cluster.
 """
 function assign_igdiscover_clusters!(clusters::Vector{Int},
                                     hcl::Clustering.Hclust,
@@ -70,15 +70,11 @@ function assign_igdiscover_clusters!(clusters::Vector{Int},
     nmerges = length(hcl.heights)
     nmerges == 0 && return
 
-    # Build a mapping: for each merge step, which leaf indices belong to left and right
+    # Precompute leaf sets for each merge step
     node_leaves = Dict{Int,Vector{Int}}()
 
     function get_leaves(idx::Int)
-        if idx < 0
-            return [-idx]
-        else
-            return get(node_leaves, idx, Int[])
-        end
+        idx < 0 ? [-idx] : get(node_leaves, idx, Int[])
     end
 
     for step in 1:nmerges
@@ -86,17 +82,14 @@ function assign_igdiscover_clusters!(clusters::Vector{Int},
         node_leaves[step] = vcat(get_leaves(left), get_leaves(right))
     end
 
-    # Sort merge steps by decreasing distance (highest first)
     sorted_steps = sortperm(hcl.heights; rev = true)
-
     prev_dist = hcl.heights[sorted_steps[1]]
     cl = 1
 
     for step_idx in sorted_steps
         dist = hcl.heights[step_idx]
-        left, right = hcl.merges[step_idx, 1], hcl.merges[step_idx, 2]
-        left_leaves = get_leaves(left)
-        right_leaves = get_leaves(right)
+        left_leaves = get_leaves(hcl.merges[step_idx, 1])
+        right_leaves = get_leaves(hcl.merges[step_idx, 2])
 
         if dist > 0 && prev_dist / dist < 0.8 &&
            length(left_leaves) >= minsize && length(right_leaves) >= minsize
