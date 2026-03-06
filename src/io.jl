@@ -6,11 +6,12 @@ struct FastaRecord
 end
 
 """
-    read_fasta(path::AbstractString) -> Vector{FastaRecord}
+    read_fasta(path::AbstractString; limit::Int=0) -> Vector{FastaRecord}
 
-Read all records from a FASTA file (plain or gzipped). Sequences are uppercased.
+Read records from a FASTA file (plain or gzipped). Sequences are uppercased.
+If `limit > 0`, stop after that many records (for quick pipeline testing).
 """
-function read_fasta(path::AbstractString)
+function read_fasta(path::AbstractString; limit::Int = 0)
     records = FastaRecord[]
     reader = if endswith(path, ".gz")
         FASTA.Reader(GzipDecompressorStream(open(path)))
@@ -21,6 +22,7 @@ function read_fasta(path::AbstractString)
         name = first(split(FASTA.identifier(record), r"\s+"))
         seq = uppercase(String(FASTA.sequence(record)))
         push!(records, FastaRecord(name, seq))
+        limit > 0 && length(records) >= limit && break
     end
     close(reader)
     records

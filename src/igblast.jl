@@ -12,15 +12,26 @@ function make_blastdb(fasta_path::AbstractString, db_name::AbstractString;
     records = read_fasta(fasta_path)
     isempty(records) && error("FASTA file $fasta_path is empty")
 
+    # Sanitize sequences for makeblastdb: only A,C,G,T,U,N allowed; IMGT gaps '.' etc. -> N
+    function sanitize_nucl(s::AbstractString)
+        buf = IOBuffer(sizehint = length(s))
+        for c in uppercase(s)
+            write(buf, c in "ACGTUN" ? c : 'N')
+        end
+        String(take!(buf))
+    end
     db_fasta = db_name * ".fasta"
     open(db_fasta, "w") do io
         for r in records
-            println(io, ">", prefix, first(split(r.name)))
-            println(io, r.sequence)
+            parts = split(r.name, '|')
+            # Unique ID: accession_allele (IMGT has duplicate accessions across alleles)
+            seq_id = length(parts) >= 2 ? join(parts[1:2], "_") : first(parts)
+            println(io, ">", prefix, seq_id)
+            println(io, sanitize_nucl(r.sequence))
         end
     end
-    run(pipeline(`makeblastdb -parse_seqids -dbtype nucl -in $db_fasta -out $db_name`,
-                 devnull, stderr=devnull))
+    run(pipeline(`makeblastdb -parse_seqids -dbtype nucl -in $db_fasta -out $db_name`;
+                 stdout=devnull, stderr=devnull))
 end
 
 """
@@ -46,7 +57,7 @@ function run_igblast_chunk(sequences::Vector{FastaRecord},
                           blastdb_dir::AbstractString;
                           species::String = "",
                           sequence_type::String = "Ig")
-    run_igblast_impl(sequences, blastdb_dir, species, sequence_type, Int[])
+    run_igblast_impl(sequences, blastdb_dir, species, sequence_type, String[])
 end
 
 """
@@ -96,8 +107,8 @@ function run_igblast_impl(sequences::Vector{FastaRecord},
     outfile = tempname()
     args_with_out = vcat(args, ["-out", outfile])
 
-    run(pipeline(IOBuffer(fasta_input), Cmd(vcat("igblastn", args_with_out)),
-                devnull, stderr=devnull))
+    run(pipeline(Cmd(vcat("igblastn", args_with_out));
+                 stdin=IOBuffer(fasta_input), stdout=devnull, stderr=devnull))
     result = read(outfile, String)
     rm(outfile; force = true)
     rm(aux_path; force = true)
@@ -106,10 +117,11 @@ end
 
 """
     run_igblast_on_fasta(database_dir, input_fasta, output_tsv_gz;
-                        sequence_type, species, penalty, threads, chunksize)
+                        sequence_type, species, penalty, threads, limit, chunksize)
 
 Run IgBLAST on a FASTA file, write AIRR TSV (gzipped) output.
 Main entry point for the IgBLAST step of the pipeline.
+When `limit > 0`, only the first `limit` reads are processed (for testing).
 """
 function run_igblast_on_fasta(database_dir::AbstractString,
                              input_fasta::AbstractString,
@@ -118,9 +130,11 @@ function run_igblast_on_fasta(database_dir::AbstractString,
                              species::String = "",
                              penalty::Int = 0,
                              threads::Int = Sys.CPU_THREADS,
+                             limit::Int = 0,
                              chunksize::Int = 1000)
-    sequences = read_fasta(input_fasta)
-    @info "Running IgBLAST on $(length(sequences)) sequences with $threads threads"
+    sequences = read_fasta(input_fasta; limit = limit)
+    limit_str = limit > 0 ? " (limit=$limit)" : ""
+    @info "Running IgBLAST on $(length(sequences)) sequences with $threads threads$limit_str"
 
     blastdb_dir = mktempdir()
     make_vdj_blastdb(blastdb_dir, database_dir)

@@ -12,27 +12,37 @@ function multialign(sequences::Dict{String,String};
 
     isempty(sequences) && return Dict{String,String}()
 
-    args = if program == "mafft"
-        `mafft --quiet --thread $threads -`
-    elseif program == "clustalo"
-        `clustalo --threads=$threads --infile=-`
-    elseif program == "muscle"
-        `muscle -quiet -in - -out -`
-    elseif program == "muscle-fast"
-        `muscle -quiet -maxiters 1 -diags -in - -out -`
-    elseif program == "muscle-medium"
-        `muscle -quiet -maxiters 2 -diags -in - -out -`
-    else
-        error("Alignment program '$program' not supported")
-    end
-
     fasta_input = IOBuffer()
     for (name, seq) in sequences
         println(fasta_input, ">", name)
         println(fasta_input, seq)
     end
+    fasta_str = String(take!(fasta_input))
 
-    output = read(pipeline(IOBuffer(take!(fasta_input)), args), String)
+    output = if program == "mafft"
+        read(pipeline(IOBuffer(fasta_str), `mafft --quiet --thread $threads -`), String)
+    elseif program == "clustalo"
+        read(pipeline(IOBuffer(fasta_str), `clustalo --threads=$threads --infile=-`), String)
+    elseif program in ("muscle", "muscle-fast", "muscle-medium")
+        # MUSCLE 5 uses -align in -output out; MUSCLE 3 uses -in file -out file
+        tmpin = tempname() * ".fa"
+        tmpout = tempname() * ".afa"
+        write(tmpin, fasta_str)
+        try
+            # Try MUSCLE 5 syntax first (muscle 5.x)
+            run(pipeline(`muscle -align $tmpin -output $tmpout`, stderr=devnull))
+            read(tmpout, String)
+        catch
+            # Fall back to MUSCLE 3 syntax (muscle -in file -out file)
+            run(pipeline(`muscle -quiet -in $tmpin -out $tmpout`, stderr=devnull))
+            read(tmpout, String)
+        finally
+            rm(tmpin; force = true)
+            rm(tmpout; force = true)
+        end
+    else
+        error("Alignment program '$program' not supported")
+    end
 
     # Parse output FASTA
     aligned = Dict{String,String}()

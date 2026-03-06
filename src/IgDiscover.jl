@@ -21,6 +21,7 @@ include("io.jl")
 include("cdr3.jl")
 include("alignment.jl")
 include("clustering.jl")
+include("group.jl")
 include("igblast.jl")
 include("augment.jl")
 include("tablefilter.jl")
@@ -39,5 +40,6 @@ export filter_table
 export discover_germline
 export germline_filter!, germline_filter_to_fasta
 export init_analysis, run_pipeline
+export group_reads
 
 end # module

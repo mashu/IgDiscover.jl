@@ -71,6 +71,25 @@ cluster_size = 50
 run_pipeline("my_analysis")
 ```
 
+**Exact files produced** (per iteration, e.g. `iteration-01/`):
+
+| File | Description |
+|------|-------------|
+| `airr.tsv.gz` | IgBLAST AIRR-format assignments |
+| `assigned.tsv.gz` | Augmented table (IgDiscover columns: V_covered, J_covered, cdr3, stop_codon normalized, etc.) |
+| `filtered.tsv.gz` | Rows passing preprocessing filter (V+J, no stop, evalue, coverage) |
+| `candidates.tab` | V gene candidates from discovery |
+| `new_V_pregermline.tab` | Candidates after pre-germline filter |
+| `new_V_pregermline.fasta` | FASTA of pre-germline sequences |
+| `annotated_V_pregermline.tab` | Annotated pre-germline table |
+| `new_V_germline.tab` | Candidates after germline filter |
+| `new_V_germline.fasta` | **Final discovered V germline sequences** |
+| `annotated_V_germline.tab` | Annotated germline table |
+| `new_J.fasta` | J genes (copy or discovered) |
+| `stats/filtered.json` | Filter counts |
+
+The `final/` directory contains the same structure with the chosen V/J database and final assignments/filtered table.
+
 ### Step-by-Step Usage
 
 ```julia

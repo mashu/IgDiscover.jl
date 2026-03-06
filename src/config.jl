@@ -83,6 +83,11 @@ struct Config
     mismatch_penalty::Int
     barcode_length::Int
     barcode_consensus::Bool
+    group_trim_g::Bool
+    group_by_cdr3::String
+    pseudo_cdr3_start::Int
+    pseudo_cdr3_end::Int
+    group_minimum_length::Int
     iterations::Int
     ignore_j::Bool
     d_coverage::Int
@@ -146,6 +151,11 @@ function parse_config(d::Dict)
         Int(get(d, "mismatch_penalty", 0)),
         Int(get(d, "barcode_length", 0)),
         Bool(get(d, "barcode_consensus", true)),
+        Bool(get(d, "group_trim_g", false)),
+        get(d, "group_by_cdr3", "none"),
+        Int(get(d, "pseudo_cdr3_start", 80)),
+        Int(get(d, "pseudo_cdr3_end", 60)),
+        Int(get(d, "group_minimum_length", 0)),
         Int(get(d, "iterations", 1)),
         Bool(get(d, "ignore_j", false)),
         Int(get(d, "d_coverage", 70)),

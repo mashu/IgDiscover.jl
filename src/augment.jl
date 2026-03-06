@@ -85,11 +85,29 @@ end
 Add IgDiscover-specific columns to an AIRR-formatted IgBLAST table.
 This must match Python igdiscover augment output exactly.
 """
+# Map short gene id (e.g. M99641_IGHV1-18*01 from IgBLAST) to full FASTA header key (IMGT uses |)
+function short_id_to_full(db::Dict{String,String})
+    out = Dict{String,String}()
+    for (name, seq) in db
+        parts = split(name, '|')
+        if length(parts) >= 2
+            short = join(parts[1:2], "_")
+            get!(out, short, name)
+        end
+        get!(out, name, name)
+    end
+    out
+end
+
 function augment_table(airr_df::DataFrame, database_dir::AbstractString;
                       sequence_type::String = "Ig")
     db_v = read_fasta_dict(joinpath(database_dir, "V.fasta"))
     db_d = read_fasta_dict(joinpath(database_dir, "D.fasta"))
     db_j = read_fasta_dict(joinpath(database_dir, "J.fasta"))
+
+    short_v = short_id_to_full(db_v)
+    short_d = short_id_to_full(db_d)
+    short_j = short_id_to_full(db_j)
 
     # Precompute CDR3 start positions for all V genes and CDR3 end for all J genes
     v_cdr3_starts = Dict{String, Dict{String, Int}}()  # locus → gene → position
@@ -162,33 +180,42 @@ function augment_table(airr_df::DataFrame, database_dir::AbstractString;
         count_alignment_errors(g, s)
     end for i in 1:n]
 
-    # Coverage
+    # Coverage (resolve short v/d/j_call to full db key for IMGT-style headers)
     result.V_covered = [begin
         g = col_str(result, :v_germline_alignment, i)
         vc = col_str(result, :v_call, i)
-        dlen = haskey(db_v, vc) ? length(db_v[vc]) : 0
+        key = get(short_v, vc, vc)
+        dlen = haskey(db_v, key) ? length(db_v[key]) : 0
         alignment_coverage(g, dlen)
     end for i in 1:n]
 
     result.D_covered = [begin
         g = col_str(result, :d_germline_alignment, i)
         dc = col_str(result, :d_call, i)
-        dlen = haskey(db_d, dc) ? length(db_d[dc]) : 0
+        key = get(short_d, dc, dc)
+        dlen = haskey(db_d, key) ? length(db_d[key]) : 0
         alignment_coverage(g, dlen)
     end for i in 1:n]
 
     result.J_covered = [begin
         g = col_str(result, :j_germline_alignment, i)
         jc = col_str(result, :j_call, i)
-        dlen = haskey(db_j, jc) ? length(db_j[jc]) : 0
+        key = get(short_j, jc, jc)
+        dlen = haskey(db_j, key) ? length(db_j[key]) : 0
         alignment_coverage(g, dlen)
     end for i in 1:n]
 
     # V_CDR3_start — the CDR3 start offset within the V alignment (0-based, for discovery)
     result.V_CDR3_start = zeros(Int, n)
-    # Also fill cdr3 / cdr3_aa columns from reference positions
+    # Also fill cdr3 / cdr3_aa columns from reference positions; ensure mutable vectors (CSV can give MissingVector)
     hasproperty(result, :cdr3) || (result.cdr3 = fill("", n))
     hasproperty(result, :cdr3_aa) || (result.cdr3_aa = fill("", n))
+    result[!, :cdr3] = Vector{String}(coalesce.(result.cdr3, ""))
+    result[!, :cdr3_aa] = Vector{String}(coalesce.(result.cdr3_aa, ""))
+    hasproperty(result, :cdr3_start) || (result.cdr3_start = zeros(Int, n))
+    hasproperty(result, :cdr3_end) || (result.cdr3_end = zeros(Int, n))
+    result[!, :cdr3_start] = Vector{Int}(coalesce.(result.cdr3_start, 0))
+    result[!, :cdr3_end] = Vector{Int}(coalesce.(result.cdr3_end, 0))
 
     for i in 1:n
         vc = col_str(result, :v_call, i)
@@ -198,9 +225,12 @@ function augment_table(airr_df::DataFrame, database_dir::AbstractString;
 
         (isempty(vc) || isempty(jc) || isempty(locus) || isempty(seq)) && continue
 
+        vc_full = get(short_v, vc, vc)
+        jc_full = get(short_j, jc, jc)
+
         # CDR3 start from V database
         v_starts_for_locus = get(v_cdr3_starts, locus, Dict{String,Int}())
-        cdr3_ref_start = get(v_starts_for_locus, vc, 0)
+        cdr3_ref_start = get(v_starts_for_locus, vc_full, 0)
         cdr3_ref_start == 0 && continue
 
         v_gs = col_int(result, :v_germline_start, i)
@@ -223,7 +253,7 @@ function augment_table(airr_df::DataFrame, database_dir::AbstractString;
 
         # CDR3 end from J database
         j_ends_for_locus = get(j_cdr3_ends, locus, Dict{String,Int}())
-        cdr3_ref_end = get(j_ends_for_locus, jc, 0)
+        cdr3_ref_end = get(j_ends_for_locus, jc_full, 0)
         cdr3_ref_end == 0 && continue
 
         j_gs = col_int(result, :j_germline_start, i)
@@ -256,9 +286,13 @@ function augment_table(airr_df::DataFrame, database_dir::AbstractString;
     # Ensure d_support column
     hasproperty(result, :d_support) || (result.d_support = fill(Inf, n))
 
-    # Ensure stop_codon column
+    # Ensure stop_codon column; normalize AIRR "true"/"false" to "T"/"F"
     if !hasproperty(result, :stop_codon)
         result.stop_codon = fill("F", n)
+    else
+        result.stop_codon = [let s = lowercase(string(coalesce(x, "")))
+            s == "true" ? "T" : (s == "false" ? "F" : string(x))
+        end for x in result.stop_codon]
     end
 
     result

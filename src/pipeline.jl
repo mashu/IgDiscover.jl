@@ -33,8 +33,13 @@ function run_pipeline(dir::AbstractString)
     cd(dir) do
         config = load_config()
         @info "IgDiscover.jl — $(config.iterations) iteration(s)"
+        config.limit > 0 && @info "Read limit active: only first $(config.limit) reads will be used (set limit=0 in igdiscover.toml for full run)"
 
         reads_path = find_reads()
+        if config.barcode_length != 0
+            @info "PCR bias correction: grouping by barcode (barcode_length=$(config.barcode_length))"
+            reads_path = group_reads(reads_path, "grouped.fasta.gz", config; limit = config.limit)
+        end
 
         for iteration in 1:config.iterations
             iter_dir = @sprintf("iteration-%02d", iteration)
@@ -84,7 +89,8 @@ function run_iteration(config::Config, iter_dir::String, reads_path::String, ite
             sequence_type = config.sequence_type,
             species = config.species,
             penalty = config.mismatch_penalty,
-            threads = Sys.CPU_THREADS)
+            threads = Sys.CPU_THREADS,
+            limit = config.limit)
     end
 
     # Augment
@@ -136,10 +142,17 @@ function run_germline_filters(config::Config, iter_dir::String, is_last::Bool)
         isfile(fasta_path) && continue
 
         candidates = CSV.read(candidates_path, DataFrame; delim = '\t')
-        filtered, annotated = germline_filter!(candidates, criteria; whitelist = wl)
-        write_table(joinpath(iter_dir, "new_V_$(prefix)germline.tab"), filtered)
-        write_table(joinpath(iter_dir, "annotated_V_$(prefix)germline.tab"), annotated)
-        germline_filter_to_fasta(filtered, fasta_path)
+        if nrow(candidates) == 0 || !hasproperty(candidates, :consensus)
+            @info "No candidates to filter, writing empty germline outputs"
+            write_table(joinpath(iter_dir, "new_V_$(prefix)germline.tab"), candidates)
+            write_table(joinpath(iter_dir, "annotated_V_$(prefix)germline.tab"), candidates)
+            write_fasta(fasta_path, FastaRecord[])
+        else
+            filtered, annotated = germline_filter!(candidates, criteria; whitelist = wl)
+            write_table(joinpath(iter_dir, "new_V_$(prefix)germline.tab"), filtered)
+            write_table(joinpath(iter_dir, "annotated_V_$(prefix)germline.tab"), annotated)
+            germline_filter_to_fasta(filtered, fasta_path)
+        end
     end
 end
 
@@ -150,9 +163,13 @@ function run_final(config::Config, reads_path::String)
 
     last_iter = @sprintf("iteration-%02d", max(config.iterations, 1))
 
-    # Copy final databases
-    v_src = config.iterations > 0 ? joinpath(last_iter, "new_V_germline.fasta") :
-                                     joinpath("database", "V.fasta")
+    # Copy final databases (fall back to initial V if discovered set is empty)
+    v_src = if config.iterations > 0 && isfile(joinpath(last_iter, "new_V_germline.fasta"))
+        cand = joinpath(last_iter, "new_V_germline.fasta")
+        isempty(read_fasta(cand)) ? joinpath("database", "V.fasta") : cand
+    else
+        joinpath("database", "V.fasta")
+    end
     isfile(v_src) || error("V database not found at $v_src")
     cp(v_src, joinpath(final_dir, "database", "V.fasta"); force = true)
     cp(joinpath("database", "D.fasta"), joinpath(final_dir, "database", "D.fasta"); force = true)
@@ -164,27 +181,37 @@ function run_final(config::Config, reads_path::String)
     end
     cp(j_src, joinpath(final_dir, "database", "J.fasta"); force = true)
 
-    # Final IgBLAST + augment + filter
     db_dir = joinpath(final_dir, "database")
-
     airr_path = joinpath(final_dir, "airr.tsv.gz")
-    if !isfile(airr_path)
-        run_igblast_on_fasta(db_dir, reads_path, airr_path;
-            sequence_type = config.sequence_type, species = config.species,
-            penalty = config.mismatch_penalty, threads = Sys.CPU_THREADS)
-    end
-
     assigned_path = joinpath(final_dir, "assigned.tsv.gz")
-    if !isfile(assigned_path)
-        airr_df = read_assignments(airr_path)
-        augmented = augment_table(airr_df, db_dir; sequence_type = config.sequence_type)
-        write_table_gzipped(assigned_path, augmented)
-    end
-
     filtered_path = joinpath(final_dir, "filtered.tsv.gz")
-    if !isfile(filtered_path)
-        filter_table(assigned_path, filtered_path, config.preprocessing_filter;
-                    stats_path = joinpath(final_dir, "stats", "filtered.json"))
+
+    # If we fell back to original V, reuse iteration results to avoid re-running IgBLAST
+    if v_src == joinpath("database", "V.fasta") && isfile(joinpath(last_iter, "airr.tsv.gz"))
+        @info "Using iteration results for final (no new V genes discovered)"
+        cp(joinpath(last_iter, "airr.tsv.gz"), airr_path; force = true)
+        cp(joinpath(last_iter, "assigned.tsv.gz"), assigned_path; force = true)
+        cp(joinpath(last_iter, "filtered.tsv.gz"), filtered_path; force = true)
+        if isfile(joinpath(last_iter, "stats", "filtered.json"))
+            cp(joinpath(last_iter, "stats", "filtered.json"), joinpath(final_dir, "stats", "filtered.json"); force = true)
+        end
+    else
+        # Final IgBLAST + augment + filter
+        if !isfile(airr_path)
+            run_igblast_on_fasta(db_dir, reads_path, airr_path;
+                sequence_type = config.sequence_type, species = config.species,
+                penalty = config.mismatch_penalty, threads = Sys.CPU_THREADS,
+                limit = config.limit)
+        end
+        if !isfile(assigned_path)
+            airr_df = read_assignments(airr_path)
+            augmented = augment_table(airr_df, db_dir; sequence_type = config.sequence_type)
+            write_table_gzipped(assigned_path, augmented)
+        end
+        if !isfile(filtered_path)
+            filter_table(assigned_path, filtered_path, config.preprocessing_filter;
+                        stats_path = joinpath(final_dir, "stats", "filtered.json"))
+        end
     end
 
     @info "Final output in $final_dir/"

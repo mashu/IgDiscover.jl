@@ -28,7 +28,11 @@ function filter_table(df::DataFrame, pf::PreprocessingFilter)
     has_vj = nrow(filtered)
 
     if hasproperty(filtered, :stop_codon)
-        filtered = filtered[filtered.stop_codon .== "F", :]
+        # Accept "F" or "false" (AIRR/IgBLAST may output true/false)
+        no_stop = [let s = lowercase(string(coalesce(x, "")))
+            s == "f" || s == "false"
+        end for x in filtered.stop_codon]
+        filtered = filtered[no_stop, :]
     end
     has_no_stop = nrow(filtered)
 

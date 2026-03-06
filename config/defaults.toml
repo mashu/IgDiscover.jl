@@ -9,8 +9,14 @@ limit = 0                         # 0 means no limit; otherwise subsample reads 
 multialign_program = "muscle-fast"
 minimum_merged_read_length = 300
 mismatch_penalty = 0              # 0 means use IgBLAST default
-barcode_length = 0
-barcode_consensus = true
+barcode_length = 0         # 0 = no grouping; positive = 5' barcode, negative = 3' barcode
+barcode_consensus = true   # use consensus for groups of 3+; else pick random
+# PCR bias correction: when barcode_length != 0, group by barcode (± CDR3), output one seq per group
+group_trim_g = false       # trim leading G after barcode (RACE artifact)
+group_by_cdr3 = "none"     # "none", "pseudo", or "real" — sub-group by (pseudo-)CDR3
+pseudo_cdr3_start = 80     # pseudo-CDR3 slice: start from 3' end (bases)
+pseudo_cdr3_end = 60       # pseudo-CDR3 slice: end from 3' end (bases)
+group_minimum_length = 0   # skip reads shorter than this in grouping
 iterations = 1
 ignore_j = false
 d_coverage = 70

@@ -108,8 +108,13 @@ function main()
     @info "IgDiscover pipeline on ERR1760498"
     setup_database()
     reads = get_reads()
-    @info "Initializing analysis at $ANALYSIS_DIR"
-    IgDiscover.init_analysis(ANALYSIS_DIR, DB_DIR, reads)
+    config_path = joinpath(ANALYSIS_DIR, "igdiscover.toml")
+    if isfile(config_path) && isfile(joinpath(ANALYSIS_DIR, "reads.fasta.gz"))
+        @info "Analysis dir already initialized, running pipeline..."
+    else
+        @info "Initializing analysis at $ANALYSIS_DIR"
+        IgDiscover.init_analysis(ANALYSIS_DIR, DB_DIR, reads)
+    end
     @info "Running pipeline..."
     IgDiscover.run_pipeline(ANALYSIS_DIR)
     @info "Done. Results in $ANALYSIS_DIR"
