@@ -1,6 +1,6 @@
 # DNA sequence utilities — pure functions, no state
 
-const GENETIC_CODE = Dict{String, Char}(
+const GENETIC_CODE = Dict{String,Char}(
     "TTT" => 'F', "TTC" => 'F', "TTA" => 'L', "TTG" => 'L',
     "CTT" => 'L', "CTC" => 'L', "CTA" => 'L', "CTG" => 'L',
     "ATT" => 'I', "ATC" => 'I', "ATA" => 'I', "ATG" => 'M',
@@ -25,13 +25,13 @@ const COMPLEMENT_MAP = Dict{Char,Char}(
 )
 
 """
-    translate(seq::AbstractString) -> String
+    translate(seq) -> String
 
 Translate nucleotide sequence to amino acids. Unknown codons become '*'.
 """
 function translate(seq::AbstractString)
     n = ncodeunits(seq) ÷ 3
-    buf = IOBuffer(; sizehint = n)
+    buf = IOBuffer(; sizehint=n)
     for i in 1:n
         codon = uppercase(SubString(seq, 3(i-1)+1, 3i))
         write(buf, get(GENETIC_CODE, codon, '*'))
@@ -40,7 +40,7 @@ function translate(seq::AbstractString)
 end
 
 """
-    reverse_complement(seq::AbstractString) -> String
+    reverse_complement(seq) -> String
 
 Return the reverse complement of a DNA sequence.
 """
@@ -49,7 +49,7 @@ function reverse_complement(seq::AbstractString)
 end
 
 """
-    has_stop(seq::AbstractString) -> Bool
+    has_stop(seq) -> Bool
 
 Check whether sequence contains an internal stop codon. Incomplete trailing codon allowed.
 """
@@ -60,12 +60,11 @@ function has_stop(seq::AbstractString)
 end
 
 """
-    edit_distance(s::AbstractString, t::AbstractString; maxdiff::Int=typemax(Int)) -> Int
+    edit_distance(s, t; maxdiff) -> Int
 
 Levenshtein distance with optional early termination at maxdiff+1.
 """
-function edit_distance(s::AbstractString, t::AbstractString; maxdiff::Int = typemax(Int))
-    # Work with codeunit vectors for DNA (ASCII-safe, avoids Unicode indexing overhead)
+function edit_distance(s::AbstractString, t::AbstractString; maxdiff::Int=typemax(Int))
     sv = codeunits(s)
     tv = codeunits(t)
     m, n = length(sv), length(tv)
@@ -73,10 +72,8 @@ function edit_distance(s::AbstractString, t::AbstractString; maxdiff::Int = type
     if !unbounded && abs(m - n) > maxdiff
         return maxdiff + 1
     end
-
     prev = collect(0:n)
     curr = Vector{Int}(undef, n + 1)
-
     for i in 1:m
         curr[1] = i
         row_min = i
@@ -94,7 +91,7 @@ function edit_distance(s::AbstractString, t::AbstractString; maxdiff::Int = type
 end
 
 """
-    hamming_distance(s::AbstractString, t::AbstractString) -> Int
+    hamming_distance(s, t) -> Int
 
 Hamming distance between two equal-length strings.
 """
@@ -105,23 +102,23 @@ function hamming_distance(s::AbstractString, t::AbstractString)
 end
 
 """
-    sequence_hash(seq::AbstractString; digits::Int=4) -> String
+    sequence_hash(seq; digits=4) -> String
 
 Fingerprint like "S1234" derived from sequence content.
 """
-function sequence_hash(seq::AbstractString; digits::Int = 4)
+function sequence_hash(seq::AbstractString; digits::Int=4)
     h = bytes2hex(sha256(Vector{UInt8}(codeunits(seq))))
-    n = parse(UInt64, h[end-3:end]; base = 16)
+    n = parse(UInt64, h[end-3:end]; base=16)
     "S" * lpad(string(n % 10^digits), digits, '0')
 end
 
 """
-    unique_name(name::AbstractString, seq::AbstractString) -> String
+    unique_name(name, seq) -> String
 
 Gene name with sequence-derived suffix. Strips existing `_S....` suffix first.
 """
 function unique_name(name::AbstractString, seq::AbstractString)
-    base = first(split(name, "_S"; limit = 2))
+    base = first(split(name, "_S"; limit=2))
     base * "_" * sequence_hash(seq)
 end
 

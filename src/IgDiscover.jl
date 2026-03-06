@@ -26,19 +26,21 @@ include("igblast.jl")
 include("augment.jl")
 include("tablefilter.jl")
 include("discovery.jl")
+include("jdiscovery.jl")
 include("germlinefilter.jl")
 include("pipeline.jl")
 
 export Config, load_config, write_default_config
-export PreprocessingFilter, GermlineFilterCriteria
-export FastaRecord, read_fasta, read_fasta_dict, write_fasta
-export read_assignments, write_table, write_table_gzipped
+export PreprocessingFilter, GermlineFilterCriteria, JDiscoveryConfig
+export FastaRecord, read_fasta, read_fasta_dict, write_fasta, write_fasta_gz
+export read_assignments, write_table, write_table_gz
 export multialign, consensus_sequence, iterative_consensus
 export run_igblast_on_fasta, make_blastdb
-export augment_table
-export filter_table
+export augment_table, parse_header
+export filter_table, FilterStats
 export discover_germline
-export germline_filter!, germline_filter_to_fasta
+export discover_j_genes, discover_j_to_fasta
+export germline_filter!, germline_filter_to_fasta, Whitelist
 export init_analysis, run_pipeline
 export group_reads
 

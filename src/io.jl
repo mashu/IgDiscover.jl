@@ -6,20 +6,18 @@ struct FastaRecord
 end
 
 """
-    read_fasta(path::AbstractString; limit::Int=0) -> Vector{FastaRecord}
+    read_fasta(path; limit=0) -> Vector{FastaRecord}
 
 Read records from a FASTA file (plain or gzipped). Sequences are uppercased.
-If `limit > 0`, stop after that many records (for quick pipeline testing).
+If `limit > 0`, stop after that many records.
 """
-function read_fasta(path::AbstractString; limit::Int = 0)
+function read_fasta(path::AbstractString; limit::Int=0)
     records = FastaRecord[]
-    reader = if endswith(path, ".gz")
-        FASTA.Reader(GzipDecompressorStream(open(path)))
-    else
+    reader = endswith(path, ".gz") ?
+        FASTA.Reader(GzipDecompressorStream(open(path))) :
         open(FASTA.Reader, path)
-    end
     for record in reader
-        name = first(split(FASTA.identifier(record), r"\s+"))
+        name = FASTA.identifier(record)
         seq = uppercase(String(FASTA.sequence(record)))
         push!(records, FastaRecord(name, seq))
         limit > 0 && length(records) >= limit && break
@@ -29,18 +27,18 @@ function read_fasta(path::AbstractString; limit::Int = 0)
 end
 
 """
-    read_fasta_dict(path::AbstractString) -> Dict{String,String}
+    read_fasta_dict(path) -> Dict{String,String}
 
-Read FASTA into name→sequence dictionary.
+Read FASTA into name → sequence dictionary.
 """
 function read_fasta_dict(path::AbstractString)
     Dict(r.name => r.sequence for r in read_fasta(path))
 end
 
 """
-    write_fasta(path::AbstractString, records::Vector{FastaRecord})
+    write_fasta(path, records)
 
-Write FASTA records to file.
+Write FASTA records to a plain-text file.
 """
 function write_fasta(path::AbstractString, records::Vector{FastaRecord})
     open(path, "w") do io
@@ -52,23 +50,39 @@ function write_fasta(path::AbstractString, records::Vector{FastaRecord})
 end
 
 function write_fasta(path::AbstractString, d::Dict{String,String})
-    records = [FastaRecord(k, v) for (k, v) in sort(collect(d); by = first)]
-    write_fasta(path, records)
+    write_fasta(path, [FastaRecord(k, v) for (k, v) in sort!(collect(d); by=first)])
 end
 
 """
-    read_assignments(path::AbstractString) -> DataFrame
+    write_fasta_gz(path, records)
 
-Read assignment table (TSV, optionally gzipped). CSV reads .gz natively.
-String columns get empty string for missing.
+Write FASTA records to a gzip-compressed file. Uses plain write_fasta for non-.gz paths.
+"""
+function write_fasta_gz(path::AbstractString, records::Vector{FastaRecord})
+    if endswith(path, ".gz")
+        open(path, "w") do io
+            stream = GzipCompressorStream(io)
+            for r in records
+                println(stream, ">", r.name)
+                println(stream, r.sequence)
+            end
+            close(stream)
+        end
+    else
+        write_fasta(path, records)
+    end
+end
+
+"""
+    read_assignments(path) -> DataFrame
+
+Read an assignment table (TSV, optionally gzipped).
 """
 function read_assignments(path::AbstractString)
-    df = CSV.read(path, DataFrame; delim = '\t', missingstring = ["", "NA"],
-                  ntasks = 1, pool = false)
-
-    string_cols = [:v_call, :d_call, :j_call, :locus, :cdr3, :sequence_id,
-                   :barcode, :sequence, :stop_codon]
-    for col in string_cols
+    df = CSV.read(path, DataFrame;
+        delim='\t', missingstring=["", "NA"], ntasks=1, pool=false)
+    for col in (:v_call, :d_call, :j_call, :locus, :cdr3, :sequence_id,
+                :barcode, :sequence, :stop_codon)
         hasproperty(df, col) || continue
         df[!, col] = coalesce.(df[!, col], "")
     end
@@ -76,23 +90,23 @@ function read_assignments(path::AbstractString)
 end
 
 """
-    write_table(path::AbstractString, df::DataFrame)
+    write_table(path, df)
 """
 function write_table(path::AbstractString, df::DataFrame)
-    CSV.write(path, df; delim = '\t')
+    CSV.write(path, df; delim='\t')
 end
 
 """
-    write_table_gzipped(path::AbstractString, df::DataFrame)
+    write_table_gz(path, df)
 
-Write DataFrame as TSV with gzip compression. CSV handles compression natively.
+Write DataFrame as gzip-compressed TSV.
 """
-function write_table_gzipped(path::AbstractString, df::DataFrame)
-    CSV.write(path, df; delim = '\t', compress = true)
+function write_table_gz(path::AbstractString, df::DataFrame)
+    CSV.write(path, df; delim='\t', compress=true)
 end
 
 """
-    validate_fasta(path::AbstractString)
+    validate_fasta(path)
 
 Validate: no empty records, no duplicate names, no duplicate sequences.
 """

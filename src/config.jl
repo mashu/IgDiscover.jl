@@ -1,26 +1,17 @@
 # Configuration types and loading
 
-"""
-    PreprocessingFilter(; v_coverage, j_coverage, v_evalue)
-
-Criteria for filtering IgBLAST assignments before discovery.
-"""
 struct PreprocessingFilter
     v_coverage::Float64
     j_coverage::Float64
     v_evalue::Float64
 end
+
 PreprocessingFilter(d::Dict) = PreprocessingFilter(
     Float64(d["v_coverage"]),
     Float64(d["j_coverage"]),
     Float64(d["v_evalue"]),
 )
 
-"""
-    GermlineFilterCriteria(; unique_cdr3s, unique_js, ...)
-
-Criteria for the germline or pre-germline filtering step.
-"""
 struct GermlineFilterCriteria
     unique_cdr3s::Int
     unique_js::Int
@@ -34,32 +25,27 @@ struct GermlineFilterCriteria
     unique_d_ratio::Float64
     unique_d_threshold::Int
 end
-function GermlineFilterCriteria(d::Dict)
-    GermlineFilterCriteria(
-        Int(d["unique_cdr3s"]),
-        Int(d["unique_js"]),
-        Bool(d["whitelist"]),
-        Int(d["cluster_size"]),
-        Bool(d["allow_stop"]),
-        Float64(d["cross_mapping_ratio"]),
-        Float64(d["clonotype_ratio"]),
-        Float64(d["exact_ratio"]),
-        Float64(d["cdr3_shared_ratio"]),
-        Float64(d["unique_d_ratio"]),
-        Int(d["unique_d_threshold"]),
-    )
-end
 
-"""
-    JDiscoveryConfig(; allele_ratio, cross_mapping_ratio, propagate)
+GermlineFilterCriteria(d::Dict) = GermlineFilterCriteria(
+    Int(d["unique_cdr3s"]),
+    Int(d["unique_js"]),
+    Bool(d["whitelist"]),
+    Int(d["cluster_size"]),
+    Bool(d["allow_stop"]),
+    Float64(d["cross_mapping_ratio"]),
+    Float64(d["clonotype_ratio"]),
+    Float64(d["exact_ratio"]),
+    Float64(d["cdr3_shared_ratio"]),
+    Float64(d["unique_d_ratio"]),
+    Int(d["unique_d_threshold"]),
+)
 
-Settings for J gene discovery.
-"""
 struct JDiscoveryConfig
     allele_ratio::Float64
     cross_mapping_ratio::Float64
     propagate::Bool
 end
+
 JDiscoveryConfig(d::Dict) = JDiscoveryConfig(
     Float64(d["allele_ratio"]),
     Float64(d["cross_mapping_ratio"]),
@@ -69,8 +55,7 @@ JDiscoveryConfig(d::Dict) = JDiscoveryConfig(
 """
     Config
 
-Complete IgDiscover configuration. Loaded from a TOML file with defaults
-merged from `config/defaults.toml`.
+Complete IgDiscover configuration. Loaded from a TOML file merged with defaults.
 """
 struct Config
     species::String
@@ -92,6 +77,7 @@ struct Config
     ignore_j::Bool
     d_coverage::Int
     subsample::Int
+    consensus_threshold::Float64
     stranded::Bool
     rename::Bool
     race_g::Bool
@@ -104,7 +90,7 @@ struct Config
 end
 
 """
-    load_config(path::AbstractString) -> Config
+    load_config(path) -> Config
 
 Load configuration from a TOML file, merging with built-in defaults.
 """
@@ -112,18 +98,12 @@ function load_config(path::AbstractString)
     defaults_path = joinpath(@__DIR__, "..", "config", "defaults.toml")
     defaults = TOML.parsefile(defaults_path)
     user = TOML.parsefile(path)
-    merged = merge_config(defaults, user)
-    parse_config(merged)
+    parse_config(merge_config(defaults, user))
 end
 
-"""
-    load_config() -> Config
-
-Load configuration from `igdiscover.toml` in the current directory.
-"""
 function load_config()
     path = "igdiscover.toml"
-    isfile(path) || error("Configuration file '$path' not found. Create it first.")
+    isfile(path) || error("Configuration file '$path' not found. Run init_analysis first.")
     load_config(path)
 end
 
@@ -160,6 +140,7 @@ function parse_config(d::Dict)
         Bool(get(d, "ignore_j", false)),
         Int(get(d, "d_coverage", 70)),
         Int(get(d, "subsample", 1000)),
+        Float64(get(d, "consensus_threshold", 60.0)),
         Bool(get(d, "stranded", false)),
         Bool(get(d, "rename", false)),
         Bool(get(d, "race_g", false)),
@@ -173,11 +154,11 @@ function parse_config(d::Dict)
 end
 
 """
-    write_default_config(path::AbstractString)
+    write_default_config(path)
 
 Write a default configuration file to the given path.
 """
 function write_default_config(path::AbstractString)
     defaults_path = joinpath(@__DIR__, "..", "config", "defaults.toml")
-    cp(defaults_path, path; force = false)
+    cp(defaults_path, path; force=false)
 end
