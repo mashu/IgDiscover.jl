@@ -8,7 +8,7 @@ Julia port of [IgDiscover](https://gitlab.com/gkhlab/igdiscover22), a tool for a
 - **Same external tools**: IgBLAST, MUSCLE, PEAR — no reimplementation of bioinformatics tools
 - **Julia idioms**: multiple dispatch, concrete parametric types, functors, TOML config
 - **No anti-patterns**: zero `try/catch`, `Any`, `isa()`, `typeof()`, `_`-prefixed functions
-- **Performance**: thread-local buffers for hot-path edit distance, precomputed hash indices for exact-match lookups
+- **Performance**: thread-local buffers for hot-path edit distance, precomputed hash indices for exact-match lookups, zero-allocation nucleotide counting in consensus
 
 ## Installation
 
@@ -82,7 +82,7 @@ src/
 ├── config.jl         # TOML configuration with concrete types
 ├── io.jl             # FASTA/TSV I/O
 ├── cdr3.jl           # CDR3 detection (ported from species.py)
-├── alignment.jl      # Multiple alignment, consensus, affine alignment
+├── alignment.jl      # Multiple alignment, consensus (NucleotideCounter), affine alignment
 ├── clustering.jl     # Hierarchical + single-linkage clustering
 ├── group.jl          # PCR bias correction (UMI/barcode grouping)
 ├── igblast.jl        # IgBLAST wrapper (calls external igblastn)
@@ -91,6 +91,7 @@ src/
 ├── discovery.jl      # V gene candidate discovery (core algorithm)
 ├── jdiscovery.jl     # J gene candidate discovery
 ├── germlinefilter.jl # Germline/pre-germline filter (dispatch-based)
+├── rename.jl         # Gene renaming (canonical names from database)
 └── pipeline.jl       # Full pipeline orchestration
 ```
 
@@ -108,8 +109,15 @@ should_discard(f::ExactRatioFilter, ref, cand, same_gene) = ...
 
 **Thread-local edit distance buffers (zero allocation in hot loops):**
 ```julia
-# Pre-allocated per-thread buffers avoid GC pressure during pairwise comparisons
-edit_distance("ACGT", "AGGT"; maxdiff=1)  # O(0) allocations
+# Pre-allocated per-thread buffers avoid GC pressure during O(n²) pairwise comparisons
+# in distance_matrix and single_linkage clustering
+edit_distance("ACGT", "AGGT"; maxdiff=1)  # 0 allocations after warmup
+```
+
+**Zero-allocation consensus counting:**
+```julia
+# NucleotideCounter replaces Dict{Char,Int} in the consensus inner loop
+# Fixed-size struct with fields for A, C, G, T, N, gap
 ```
 
 **Precomputed hash indices in discovery:**
@@ -140,8 +148,10 @@ julia --project=. test/run_parity_test.jl /path/to/python/analysis /path/to/juli
 - [x] TOML configuration
 - [x] Thread-local edit distance buffers
 - [x] Precomputed hash indices for discovery
+- [x] J gene discovery
+- [x] Gene renaming
+- [x] PCR bias correction (barcode grouping)
 - [x] Parity test infrastructure
-- [ ] J gene discovery (discoverjd)
 - [ ] Clonotypes subcommand
 - [ ] Clonoquery subcommand
 - [ ] Plot alleles

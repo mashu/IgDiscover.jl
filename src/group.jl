@@ -207,7 +207,6 @@ function trim_reads_race_g(
 
     records = read_fasta(input_path; limit=limit)
     trimmed = [FastaRecord(r.name, trim_leading_g(r.sequence)) for r in records]
-    # Remove empty sequences after trimming
     filter!(r -> !isempty(r.sequence), trimmed)
 
     write_fasta_gz(output_path, trimmed)

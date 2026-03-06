@@ -152,11 +152,9 @@ function run_igblast_on_fasta(database_dir::AbstractString,
     stream = GzipCompressorStream(io)
     for (i, result) in enumerate(results)
         if i == 1
-            # Write first chunk completely (includes header)
             write(stream, result)
             endswith(result, '\n') || write(stream, '\n')
         else
-            # Skip first line (header) of subsequent chunks
             first_nl = findfirst('\n', result)
             first_nl === nothing && continue
             remainder = SubString(result, first_nl + 1)

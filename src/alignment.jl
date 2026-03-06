@@ -68,10 +68,57 @@ function parse_fasta_string(output::String)
     aligned
 end
 
+# ─── Nucleotide counter (replaces Dict{Char,Int} in consensus hot loop) ───
+
+"""
+Fixed-size counter for alignment columns: A, C, G, T, N, gap.
+Avoids Dict allocation in the consensus inner loop.
+"""
+mutable struct NucleotideCounter
+    a::Int; c::Int; g::Int; t::Int; n::Int; gap::Int
+end
+
+NucleotideCounter() = NucleotideCounter(0, 0, 0, 0, 0, 0)
+
+function reset!(nc::NucleotideCounter)
+    nc.a = nc.c = nc.g = nc.t = nc.n = nc.gap = 0
+    nc
+end
+
+function count!(nc::NucleotideCounter, ch::Char)
+    ch == 'A' ? (nc.a += 1) :
+    ch == 'C' ? (nc.c += 1) :
+    ch == 'G' ? (nc.g += 1) :
+    ch == 'T' ? (nc.t += 1) :
+    ch == '-' ? (nc.gap += 1) :
+    (nc.n += 1)
+    nc
+end
+
+function best_base(nc::NucleotideCounter)
+    best_char, best_freq = '-', nc.gap
+    nc.a > best_freq && (best_char = 'A'; best_freq = nc.a)
+    nc.c > best_freq && (best_char = 'C'; best_freq = nc.c)
+    nc.g > best_freq && (best_char = 'G'; best_freq = nc.g)
+    nc.t > best_freq && (best_char = 'T'; best_freq = nc.t)
+    nc.n > best_freq && (best_char = 'N'; best_freq = nc.n)
+    (best_char, best_freq)
+end
+
+function adjust_gaps!(nc::NucleotideCounter, excess::Int)
+    if excess > 0
+        nc.gap = excess
+    else
+        nc.gap = 0
+    end
+    nc
+end
+
 """
     consensus_sequence(aligned; threshold=0.7, ambiguous='N') -> String
 
 Compute a consensus from aligned sequences, allowing degraded 3' ends.
+Processes columns from 3'→5', then reverses — O(n) total.
 """
 function consensus_sequence(aligned::AbstractVector{String};
                            threshold::Float64 = 0.7,
@@ -80,46 +127,34 @@ function consensus_sequence(aligned::AbstractVector{String};
     ncols = maximum(length, aligned)
     nseqs = length(aligned)
 
-    # Build result in reverse order (3'→5'), then reverse at end — O(n) vs O(n²)
     result_rev = Char[]
     sizehint!(result_rev, ncols)
     active = max(1, round(Int, nseqs * 0.05))
 
-    counts = Dict{Char,Int}()
+    counts = NucleotideCounter()
 
-    # Process from the 3' end (reversed), same as Python version
     for col_rev in 0:ncols-1
         col = ncols - col_rev
-        empty!(counts)
+        reset!(counts)
+
         for seq in aligned
-            c = col <= length(seq) ? seq[col] : '-'
-            counts[c] = get(counts, c, 0) + 1
+            ch = col <= length(seq) ? seq[col] : '-'
+            count!(counts, ch)
         end
-        gap_count = get(counts, '-', 0)
+
+        gap_count = counts.gap
         active = max(nseqs - gap_count, active)
 
-        adjusted_gaps = gap_count - (nseqs - active)
-        if adjusted_gaps > 0
-            counts['-'] = adjusted_gaps
-        else
-            delete!(counts, '-')
-        end
+        adjust_gaps!(counts, gap_count - (nseqs - active))
 
         if col_rev >= 10
             active = nseqs
         end
 
-        best_char, best_freq = ' ', 0
-        for (c, f) in counts
-            if f > best_freq
-                best_char, best_freq = c, f
-            end
-        end
+        ch, freq = best_base(counts)
 
-        if best_freq / active >= threshold
-            if best_char != '-'
-                push!(result_rev, best_char)
-            end
+        if freq / active >= threshold
+            ch != '-' && push!(result_rev, ch)
         else
             push!(result_rev, ambiguous)
         end

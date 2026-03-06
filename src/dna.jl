@@ -59,10 +59,48 @@ function has_stop(seq::AbstractString)
     occursin('*', translate(SubString(seq, 1, 3n)))
 end
 
+# ─── Thread-local edit distance buffers ───
+#
+# edit_distance is the hottest function in the package: called O(n²) in
+# distance_matrix and single_linkage. Pre-allocated per-thread row buffers
+# eliminate allocation pressure entirely in these loops.
+
+struct EditDistanceBuffers
+    prev::Vector{Int}
+    curr::Vector{Int}
+end
+
+EditDistanceBuffers() = EditDistanceBuffers(Int[], Int[])
+
+function ensure_capacity!(buf::EditDistanceBuffers, n::Int)
+    needed = n + 1
+    length(buf.prev) < needed && resize!(buf.prev, needed)
+    length(buf.curr) < needed && resize!(buf.curr, needed)
+    buf
+end
+
+# Lazy init: grows to match nthreads() on first access from each thread
+const EDIT_BUFFERS = EditDistanceBuffers[]
+const EDIT_BUFFERS_LOCK = ReentrantLock()
+
+function get_edit_buffers()
+    tid = Threads.threadid()
+    if tid <= length(EDIT_BUFFERS)
+        return @inbounds EDIT_BUFFERS[tid]
+    end
+    lock(EDIT_BUFFERS_LOCK) do
+        while length(EDIT_BUFFERS) < tid
+            push!(EDIT_BUFFERS, EditDistanceBuffers())
+        end
+    end
+    @inbounds EDIT_BUFFERS[tid]
+end
+
 """
     edit_distance(s, t; maxdiff) -> Int
 
 Levenshtein distance with optional early termination at maxdiff+1.
+Uses thread-local pre-allocated buffers for zero-allocation hot loops.
 """
 function edit_distance(s::AbstractString, t::AbstractString; maxdiff::Int=typemax(Int))
     sv = codeunits(s)
@@ -73,8 +111,13 @@ function edit_distance(s::AbstractString, t::AbstractString; maxdiff::Int=typema
         return maxdiff + 1
     end
 
-    prev = collect(0:n)
-    curr = Vector{Int}(undef, n + 1)
+    buf = ensure_capacity!(get_edit_buffers(), n)
+    prev = buf.prev
+    curr = buf.curr
+
+    @inbounds for j in 0:n
+        prev[j+1] = j
+    end
 
     @inbounds for i in 1:m
         curr[1] = i

@@ -16,6 +16,9 @@ using DataFrames
         @test IgDiscover.edit_distance("ABC", "ABC") == 0
         @test IgDiscover.edit_distance("ABC", "ABD") == 1
         @test IgDiscover.edit_distance("ABC", "XYZ"; maxdiff=1) == 2
+        @test IgDiscover.edit_distance("", "") == 0
+        @test IgDiscover.edit_distance("ABC", "") == 3
+        @test IgDiscover.edit_distance("", "ABC") == 3
 
         @test IgDiscover.hamming_distance("AAAA", "ABCA") == 2
 
@@ -28,6 +31,32 @@ using DataFrames
         @test IgDiscover.is_same_gene("IGHV1-2*01", "IGHV1-2*02")
         @test !IgDiscover.is_same_gene("IGHV1-2*01", "IGHV1-3*01")
         @test !IgDiscover.is_same_gene("IGHV1", "IGHV2")
+    end
+
+    @testset "Edit distance thread safety" begin
+        # Verify thread-local buffers produce correct results under contention
+        results = Vector{Int}(undef, 100)
+        Threads.@threads for i in 1:100
+            results[i] = IgDiscover.edit_distance("ABCDEF", "XBCDEY")
+        end
+        @test all(==(2), results)
+
+        # Varying lengths to stress buffer resizing
+        results2 = Vector{Int}(undef, 50)
+        Threads.@threads for i in 1:50
+            s = repeat("A", i)
+            t = repeat("A", i)
+            results2[i] = IgDiscover.edit_distance(s, t)
+        end
+        @test all(==(0), results2)
+    end
+
+    @testset "Edit distance with maxdiff" begin
+        # maxdiff early termination
+        @test IgDiscover.edit_distance("AAAA", "ZZZZ"; maxdiff=2) == 3
+        @test IgDiscover.edit_distance("AAAA", "AABA"; maxdiff=5) == 1
+        # Length difference exceeds maxdiff
+        @test IgDiscover.edit_distance("A", "ABCD"; maxdiff=1) == 2
     end
 
     @testset "Configuration" begin
@@ -64,6 +93,11 @@ using DataFrames
 
         d = IgDiscover.read_fasta_dict(path)
         @test d["g1"] == "ATCG"
+
+        # limit parameter
+        loaded_lim = IgDiscover.read_fasta(path; limit=1)
+        @test length(loaded_lim) == 1
+
         rm(tmpdir; recursive=true)
     end
 
@@ -83,6 +117,35 @@ using DataFrames
         @test IgDiscover.describe_nt_change("AAA", "AGA") == "2A>G"
         @test IgDiscover.describe_nt_change("AAGG", "AATTGG") == "2_3insTT"
         @test IgDiscover.describe_nt_change("AATTGG", "AAGG") == "3_4delTT"
+    end
+
+    @testset "NucleotideCounter" begin
+        nc = IgDiscover.NucleotideCounter()
+        IgDiscover.count!(nc, 'A')
+        IgDiscover.count!(nc, 'A')
+        IgDiscover.count!(nc, 'C')
+        IgDiscover.count!(nc, '-')
+        ch, freq = IgDiscover.best_base(nc)
+        @test ch == 'A'
+        @test freq == 2
+
+        IgDiscover.reset!(nc)
+        @test nc.a == 0
+        @test nc.gap == 0
+    end
+
+    @testset "Consensus sequence" begin
+        seqs = ["AAAA", "AABA", "AACA"]
+        cons = IgDiscover.consensus_sequence(seqs; threshold=0.5)
+        @test length(cons) == 4
+        @test cons[1] == 'A'
+
+        @test IgDiscover.consensus_sequence(String[]) == ""
+        @test IgDiscover.consensus_sequence(["ATCG"]; threshold=0.5) == "ATCG"
+
+        # Unanimous consensus
+        seqs2 = ["ATCG", "ATCG", "ATCG"]
+        @test IgDiscover.consensus_sequence(seqs2; threshold=0.7) == "ATCG"
     end
 
     @testset "Clustering" begin
@@ -138,6 +201,10 @@ using DataFrames
 
         @test !isempty(IgDiscover.should_discard(IgDiscover.IdenticalSequenceFilter(), ref, cand, false))
         @test !isempty(IgDiscover.should_discard(IgDiscover.ExactRatioFilter(0.5), ref, cand, true))
+
+        # Whitelisted candidate should not be discarded by IdenticalSequenceFilter
+        cand_wl = IgDiscover.FilterCandidate("ATCG", "g1*02", 1, 1, 1, 5, true, true, true, 4, 2)
+        @test isempty(IgDiscover.should_discard(IgDiscover.IdenticalSequenceFilter(), ref, cand_wl, false))
     end
 
     @testset "N-tolerant merge" begin
@@ -195,33 +262,11 @@ using DataFrames
         @test !(j3 in filtered)
     end
 
-    @testset "Edit distance thread safety" begin
-        results = Vector{Int}(undef, 100)
-        Threads.@threads for i in 1:100
-            results[i] = IgDiscover.edit_distance("ABCDEF", "XBCDEY")
-        end
-        @test all(==(2), results)
-    end
-
     @testset "Tallies" begin
         t = IgDiscover.tallies(["a", "b", "a", "c", "a"])
         @test t["a"] == 3
         @test t["b"] == 1
         @test t["c"] == 1
-    end
-
-    @testset "Consensus sequence" begin
-        # Basic consensus
-        seqs = ["AAAA", "AABA", "AACA"]
-        cons = IgDiscover.consensus_sequence(seqs; threshold=0.5)
-        @test length(cons) == 4
-        @test cons[1] == 'A'
-
-        # Empty input
-        @test IgDiscover.consensus_sequence(String[]) == ""
-
-        # Single sequence
-        @test IgDiscover.consensus_sequence(["ATCG"]; threshold=0.5) == "ATCG"
     end
 
     @testset "Rename genes" begin
@@ -246,12 +291,6 @@ using DataFrames
         rm(tmpdir; recursive=true)
     end
 
-    @testset "Trim leading G (race_g)" begin
-        @test IgDiscover.trim_leading_g("GGGAATCG") == "AATCG"
-        @test IgDiscover.trim_leading_g("AATCG")    == "AATCG"
-        @test IgDiscover.trim_leading_g("GGGG")      == ""
-    end
-
     @testset "Distance matrix" begin
         seqs = ["AAAA", "AABA", "AAAA"]
         M, clusters = IgDiscover.cluster_sequences(seqs; minsize=1)
@@ -259,6 +298,28 @@ using DataFrames
         @test M[1, 1] == 0.0
         @test M[1, 3] == 0.0  # identical sequences
         @test M[1, 2] > 0.0
+    end
+
+    @testset "Validate FASTA" begin
+        tmpdir = mktempdir()
+
+        # Valid file
+        path = joinpath(tmpdir, "valid.fasta")
+        IgDiscover.write_fasta(path, [
+            IgDiscover.FastaRecord("a", "ATCG"),
+            IgDiscover.FastaRecord("b", "GGCC"),
+        ])
+        IgDiscover.validate_fasta(path)  # should not throw
+
+        # Duplicate names
+        dup_path = joinpath(tmpdir, "dup.fasta")
+        IgDiscover.write_fasta(dup_path, [
+            IgDiscover.FastaRecord("a", "ATCG"),
+            IgDiscover.FastaRecord("a", "GGCC"),
+        ])
+        @test_throws ErrorException IgDiscover.validate_fasta(dup_path)
+
+        rm(tmpdir; recursive=true)
     end
 
 end

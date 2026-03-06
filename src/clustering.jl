@@ -15,26 +15,23 @@ function distance_matrix(sequences::Vector{String}; band::Float64 = 0.2)
     nu = length(unique_seqs)
 
     # Compute pairwise distances for unique sequences (threaded)
-    unique_dist_matrix = zeros(Int, nu, nu)
+    unique_dist = zeros(Int, nu, nu)
     pairs = [(i, j) for i in 1:nu for j in (i+1):nu]
     Threads.@threads for idx in eachindex(pairs)
         i, j = pairs[idx]
         d = min(maxdiff + 1, edit_distance(unique_seqs[i], unique_seqs[j]; maxdiff = maxdiff))
-        unique_dist_matrix[i, j] = d
-        unique_dist_matrix[j, i] = d
+        unique_dist[i, j] = d
+        unique_dist[j, i] = d
     end
 
     # Map unique sequences to indices for O(1) lookup
-    seq_to_uid = Dict{String,Int}()
-    for (i, s) in enumerate(unique_seqs)
-        seq_to_uid[s] = i
-    end
+    seq_to_uid = Dict{String,Int}(s => i for (i, s) in enumerate(unique_seqs))
 
     M = zeros(Float64, n, n)
     @inbounds for i in 1:n, j in (i+1):n
         ui = seq_to_uid[sequences[i]]
         uj = seq_to_uid[sequences[j]]
-        d = ui == uj ? 0.0 : Float64(unique_dist_matrix[ui, uj])
+        d = ui == uj ? 0.0 : Float64(unique_dist[ui, uj])
         M[i, j] = M[j, i] = d
     end
     M
@@ -62,7 +59,7 @@ end
 Assign cluster IDs using igdiscover's distance-ratio heuristic.
 
 Walk merge tree from highest to lowest distance. When ratio prev/current drops
-below 0.8 and both subtrees have >= minsize leaves, assign a cluster.
+below 0.8 and both subtrees have ≥ minsize leaves, assign a cluster.
 """
 function assign_igdiscover_clusters!(clusters::Vector{Int},
                                     hcl::Clustering.Hclust,
@@ -70,16 +67,15 @@ function assign_igdiscover_clusters!(clusters::Vector{Int},
     nmerges = length(hcl.heights)
     nmerges == 0 && return
 
-    # Precompute leaf sets for each merge step
-    node_leaves = Dict{Int,Vector{Int}}()
-
-    function get_leaves(idx::Int)
-        idx < 0 ? [-idx] : get(node_leaves, idx, Int[])
-    end
+    # Pre-build leaf sets bottom-up (each merge step unions its children)
+    # node_leaves[step] contains the leaf indices for the subtree at that merge
+    node_leaves = Vector{Vector{Int}}(undef, nmerges)
 
     for step in 1:nmerges
         left, right = hcl.merges[step, 1], hcl.merges[step, 2]
-        node_leaves[step] = vcat(get_leaves(left), get_leaves(right))
+        left_leaves  = left < 0  ? [-left]  : node_leaves[left]
+        right_leaves = right < 0 ? [-right] : node_leaves[right]
+        node_leaves[step] = vcat(left_leaves, right_leaves)
     end
 
     sorted_steps = sortperm(hcl.heights; rev = true)
@@ -88,8 +84,10 @@ function assign_igdiscover_clusters!(clusters::Vector{Int},
 
     for step_idx in sorted_steps
         dist = hcl.heights[step_idx]
-        left_leaves = get_leaves(hcl.merges[step_idx, 1])
-        right_leaves = get_leaves(hcl.merges[step_idx, 2])
+        left  = hcl.merges[step_idx, 1]
+        right = hcl.merges[step_idx, 2]
+        left_leaves  = left < 0  ? [-left]  : node_leaves[left]
+        right_leaves = right < 0 ? [-right] : node_leaves[right]
 
         if dist > 0 && prev_dist / dist < 0.8 &&
            length(left_leaves) >= minsize && length(right_leaves) >= minsize

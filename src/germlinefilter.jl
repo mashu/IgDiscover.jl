@@ -170,15 +170,18 @@ function germline_filter!(
     criteria.unique_d_ratio      > 0 && push!(filters, UniqueDRatioFilter(criteria.unique_d_ratio, criteria.unique_d_threshold))
 
     # Build FilterCandidate snapshots
+    has_db_diff = hasproperty(candidates, :database_diff)
+    has_cdr3_start = hasproperty(candidates, :CDR3_start)
+
     fc = [FilterCandidate(
         candidates.consensus[i], candidates.name[i],
         candidates.clonotypes[i], candidates.exact[i], candidates.Ds_exact[i],
         candidates.cluster_size[i],
         candidates.whitelist_diff[i] == 0,
-        !ismissing(get(candidates, :database_diff, missing)[i]) &&
+        has_db_diff && !ismissing(candidates.database_diff[i]) &&
             candidates.database_diff[i] == 0,
         occursin("all", candidates.cluster[i]) || occursin("db", candidates.cluster[i]),
-        hasproperty(candidates, :CDR3_start) ? candidates.CDR3_start[i] : 10000,
+        has_cdr3_start ? candidates.CDR3_start[i] : 10000,
         i,
     ) for i in 1:n]
 
