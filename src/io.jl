@@ -5,22 +5,48 @@ struct FastaRecord
     sequence::String
 end
 
+# Minimal IO wrapper that prepends one byte so we can peek and still pass stream to reader
+mutable struct PrependIO <: IO
+    first::Union{UInt8,Nothing}
+    rest::IO
+end
+Base.read(io::PrependIO, ::Type{UInt8}) = io.first !== nothing ? (b = io.first; io.first = nothing; b) : read(io.rest, UInt8)
+Base.eof(io::PrependIO) = io.first === nothing && eof(io.rest)
+Base.close(io::PrependIO) = close(io.rest)
+Base.isopen(io::PrependIO) = isopen(io.rest)
+Base.bytesavailable(io::PrependIO) = (io.first !== nothing ? 1 : 0) + bytesavailable(io.rest)
+
 """
     read_fasta(path; limit=0) -> Vector{FastaRecord}
 
-Read records from a FASTA file (plain or gzipped). Sequences are uppercased.
+Read records from a FASTA or FASTQ file (plain or gzipped). Format is auto-detected
+by the first character ('>' = FASTA, '@' = FASTQ). Sequences are uppercased.
 If `limit > 0`, stop after that many records.
 """
 function read_fasta(path::AbstractString; limit::Int=0)
     records = FastaRecord[]
-    reader = endswith(path, ".gz") ?
-        FASTA.Reader(GzipDecompressorStream(open(path))) :
-        open(FASTA.Reader, path)
-    for record in reader
-        name = FASTA.identifier(record)
-        seq = uppercase(String(FASTA.sequence(record)))
-        push!(records, FastaRecord(name, seq))
-        limit > 0 && length(records) >= limit && break
+    raw = endswith(path, ".gz") ? GzipDecompressorStream(open(path)) : open(path)
+    first_byte = read(raw, UInt8)
+    stream = PrependIO(first_byte, raw)
+    if first_byte == UInt8('>')
+        reader = FASTA.Reader(stream)
+        for record in reader
+            name = FASTA.identifier(record)
+            seq = uppercase(String(FASTA.sequence(record)))
+            push!(records, FastaRecord(name, seq))
+            limit > 0 && length(records) >= limit && break
+        end
+    elseif first_byte == UInt8('@')
+        reader = FASTQ.Reader(stream)
+        for record in reader
+            name = first(split(FASTQ.identifier(record), r"\s+"))
+            seq = uppercase(String(FASTQ.sequence(record)))
+            push!(records, FastaRecord(name, seq))
+            limit > 0 && length(records) >= limit && break
+        end
+    else
+        close(stream)
+        error("Not FASTA (>) or FASTQ (@): first byte '$(Char(first_byte))' (0x$(string(first_byte, base=16))) in $path")
     end
     close(reader)
     records
