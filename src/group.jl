@@ -4,6 +4,27 @@ const MIN_CONSENSUS_SEQUENCES = 3
 const GROUP_CONSENSUS_THRESHOLD = 0.501
 const CDR3_LENGTH_TOLERANCE = 2
 
+# CDR3 extraction mode for grouping: dispatch instead of config.group_by_cdr3 == "real"
+abstract type GroupByCdr3Mode end
+struct RealCdr3Mode <: GroupByCdr3Mode end
+struct PseudoCdr3Mode <: GroupByCdr3Mode end
+
+const GROUP_BY_CDR3_MODES = Dict{String, GroupByCdr3Mode}(
+    "real" => RealCdr3Mode(),
+    "pseudo" => PseudoCdr3Mode(),
+)
+to_group_by_cdr3_mode(s::AbstractString) = GROUP_BY_CDR3_MODES[s]
+
+"""Return CDR3 string for this record, or nothing to skip. Dispatches on mode."""
+function extract_cdr3_for_group end
+function extract_cdr3_for_group(record::FastaRecord, ::RealCdr3Mode, config::Config)
+    st, en = find_cdr3(record.sequence, "IGH")
+    st > 0 ? record.sequence[st:en] : nothing
+end
+function extract_cdr3_for_group(record::FastaRecord, ::PseudoCdr3Mode, config::Config)
+    pseudo_cdr3(record.sequence, config.pseudo_cdr3_start, config.pseudo_cdr3_end)
+end
+
 # ─── ConsensusCounter functor (replaces Ref{Int}) ───
 
 """
@@ -188,14 +209,11 @@ function group_reads(
         clusters = if !group_by_cdr3
             [[(r, "") for r in seqs]]
         else
+            mode = to_group_by_cdr3_mode(config.group_by_cdr3)
             records_with_cdr3 = Tuple{FastaRecord,String}[]
             for r in seqs
-                cdr3 = if config.group_by_cdr3 == "real"
-                    st, en = find_cdr3(r.sequence, "IGH")
-                    st > 0 ? r.sequence[st:en] : continue
-                else
-                    pseudo_cdr3(r.sequence, config.pseudo_cdr3_start, config.pseudo_cdr3_end)
-                end
+                cdr3 = extract_cdr3_for_group(r, mode, config)
+                cdr3 === nothing && continue
                 push!(records_with_cdr3, (r, cdr3))
             end
             isempty(records_with_cdr3) ? continue : cluster_by_cdr3(records_with_cdr3)
