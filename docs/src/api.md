@@ -35,9 +35,10 @@ discover_germline
 germline_filter!
 deduplicate_by_consensus
 germline_filter_to_fasta
-discover_j_genes
 rename_genes
 call_clonotypes
 ```
+
+[`discover_j_genes`](@ref) and [`discover_j_to_fasta`](@ref) are documented in the **J Discovery** module.
 
 For DNA utilities, alignment, CDR3 detection, and clustering see the module pages: **DNA Utilities**, **Alignment**, **CDR3 Detection**, **Clustering**.

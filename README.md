@@ -1,6 +1,6 @@
 # IgDiscover.jl
 
-[![CI](https://github.com/mashu/IgDiscover.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/mashu/IgDiscover.jl/actions/workflows/ci.yml)
+[![CI](https://github.com/mashu/IgDiscover.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/mashu/IgDiscover.jl/actions/workflows/CI.yml)
 [![codecov](https://codecov.io/gh/mashu/IgDiscover.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/mashu/IgDiscover.jl)
 [![Stable Docs](https://img.shields.io/badge/docs-stable-blue.svg)](https://mashu.github.io/IgDiscover.jl/stable/)
 [![Dev Docs](https://img.shields.io/badge/docs-dev-blue.svg)](https://mashu.github.io/IgDiscover.jl/dev/)

@@ -131,7 +131,7 @@ Relevant functions: [`germline_filter!`](@ref), [`deduplicate_by_consensus`](@re
 
 - Individualized J alleles improve assignment accuracy and CDR3 boundary detection, which in turn improves V discovery and downstream analyses.
 
-Relevant functions: [`discover_j_genes`](@ref), `discover_j_to_fasta`. Configuration: [`JDiscoveryConfig`](@ref). See the Discovery module.
+Relevant functions: [`discover_j_genes`](@ref), [`discover_j_to_fasta`](@ref). Configuration: [`JDiscoveryConfig`](@ref). See the J Discovery module.
 
 ---
 

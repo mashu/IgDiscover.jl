@@ -15,6 +15,7 @@ makedocs(;
     pages=[
         "Home" => "index.md",
         "Algorithm" => "algorithm.md",
+        "Output formats" => "output_formats.md",
         "Configuration" => "config.md",
         "Pipeline" => "pipeline.md",
         "Modules" => [
@@ -27,6 +28,7 @@ makedocs(;
             "Alignment" => "modules/alignment.md",
             "Clustering" => "modules/clustering.md",
             "Discovery" => "modules/discovery.md",
+            "J Discovery" => "modules/jdiscovery.md",
             "Germline Filter" => "modules/germlinefilter.md",
             "Clonotypes" => "modules/clonotypes.md",
         ],

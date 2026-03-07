@@ -23,7 +23,7 @@ After the last iteration, the pipeline:
 - Re-runs IgBLAST (and augment/filter) with this database unless results can be reused.
 - Runs **clonotype calling** on the final filtered table → `final/clonotypes.tsv`.
 
-Outputs in `final/`: `airr.tsv.gz`, `assigned.tsv.gz`, `filtered.tsv.gz`, `database/V.fasta` (and D, J), `stats/`, and `clonotypes.tsv`.
+Outputs in `final/`: `airr.tsv.gz`, `assigned.tsv.gz`, `filtered.tsv.gz`, `database/V.fasta` (and D, J), `stats/`, and `clonotypes.tsv`. For column definitions and formulas, see [Output formats](@ref).
 
 ## Optional preprocessing (before iterations)
 
