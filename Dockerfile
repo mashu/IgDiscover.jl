@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ── Python igdiscover via conda (bioconda bundles igblast, muscle, pear) ──
 RUN micromamba install -y -n base -c conda-forge -c bioconda \
         igdiscover=0.15.1 \
-        python=3.11 \
+        python=3.10 \
     && micromamba clean --all --yes
 
 # Make conda env available
