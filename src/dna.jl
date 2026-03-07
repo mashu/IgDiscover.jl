@@ -1,42 +1,16 @@
-# DNA sequence utilities — pure functions, no state
-
-const GENETIC_CODE = Dict{String,Char}(
-    "TTT" => 'F', "TTC" => 'F', "TTA" => 'L', "TTG" => 'L',
-    "CTT" => 'L', "CTC" => 'L', "CTA" => 'L', "CTG" => 'L',
-    "ATT" => 'I', "ATC" => 'I', "ATA" => 'I', "ATG" => 'M',
-    "GTT" => 'V', "GTC" => 'V', "GTA" => 'V', "GTG" => 'V',
-    "TCT" => 'S', "TCC" => 'S', "TCA" => 'S', "TCG" => 'S',
-    "CCT" => 'P', "CCC" => 'P', "CCA" => 'P', "CCG" => 'P',
-    "ACT" => 'T', "ACC" => 'T', "ACA" => 'T', "ACG" => 'T',
-    "GCT" => 'A', "GCC" => 'A', "GCA" => 'A', "GCG" => 'A',
-    "TAT" => 'Y', "TAC" => 'Y', "TAA" => '*', "TAG" => '*',
-    "CAT" => 'H', "CAC" => 'H', "CAA" => 'Q', "CAG" => 'Q',
-    "AAT" => 'N', "AAC" => 'N', "AAA" => 'K', "AAG" => 'K',
-    "GAT" => 'D', "GAC" => 'D', "GAA" => 'E', "GAG" => 'E',
-    "TGT" => 'C', "TGC" => 'C', "TGA" => '*', "TGG" => 'W',
-    "CGT" => 'R', "CGC" => 'R', "CGA" => 'R', "CGG" => 'R',
-    "AGT" => 'S', "AGC" => 'S', "AGA" => 'R', "AGG" => 'R',
-    "GGT" => 'G', "GGC" => 'G', "GGA" => 'G', "GGG" => 'G',
-)
-
-const COMPLEMENT_MAP = Dict{Char,Char}(
-    'A' => 'T', 'T' => 'A', 'C' => 'G', 'G' => 'C', 'N' => 'N',
-    'a' => 't', 't' => 'a', 'c' => 'g', 'g' => 'c', 'n' => 'n',
-)
+# DNA sequence utilities — delegates to BioSequences for translation and complement
 
 """
     translate(seq) -> String
 
-Translate nucleotide sequence to amino acids. Unknown codons become '*'.
+Translate nucleotide sequence to amino acids using the standard genetic code.
+Ambiguous codons that resolve to a single amino acid are allowed; unresolvable ones become 'X'.
 """
 function translate(seq::AbstractString)
     n = ncodeunits(seq) ÷ 3
-    buf = IOBuffer(; sizehint=n)
-    for i in 1:n
-        codon = uppercase(SubString(seq, 3(i-1)+1, 3i))
-        write(buf, get(GENETIC_CODE, codon, '*'))
-    end
-    String(take!(buf))
+    n == 0 && return ""
+    dna = BioSequences.LongDNA{4}(uppercase(SubString(seq, 1, 3n)))
+    String(BioSequences.translate(dna; allow_ambiguous_codons=true))
 end
 
 """
@@ -45,7 +19,7 @@ end
 Return the reverse complement of a DNA sequence.
 """
 function reverse_complement(seq::AbstractString)
-    String([get(COMPLEMENT_MAP, c, 'N') for c in Iterators.reverse(seq)])
+    String(BioSequences.reverse_complement(BioSequences.LongDNA{4}(seq)))
 end
 
 """

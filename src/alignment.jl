@@ -52,6 +52,21 @@ aligner_for_program(program::String) = get(ALIGNERS, program) do
 end
 
 """
+    parse_fasta_string(output) -> Dict{String,String}
+
+Parse a FASTA-format string into name → sequence dictionary. Uses FASTX.FASTA.Reader.
+"""
+function parse_fasta_string(output::String)
+    aligned = Dict{String,String}()
+    reader = FASTA.Reader(IOBuffer(output))
+    for record in reader
+        aligned[FASTA.identifier(record)] = uppercase(String(FASTA.sequence(record)))
+    end
+    close(reader)
+    aligned
+end
+
+"""
     multialign(sequences::Dict{String,String}; program="muscle-fast", threads=Sys.CPU_THREADS) -> Dict{String,String}
 
 Run a multiple sequence alignment program and return aligned sequences.
@@ -69,26 +84,6 @@ function multialign(sequences::Dict{String,String};
     fasta_str = String(take!(fasta_input))
     output = run_align(aligner_for_program(program), fasta_str, threads)
     parse_fasta_string(output)
-end
-
-function parse_fasta_string(output::String)
-    aligned = Dict{String,String}()
-    current_name = ""
-    current_seq = IOBuffer()
-    for line in eachline(IOBuffer(output))
-        if startswith(line, '>')
-            if !isempty(current_name)
-                aligned[current_name] = uppercase(String(take!(current_seq)))
-            end
-            current_name = strip(line[2:end])
-        else
-            write(current_seq, strip(line))
-        end
-    end
-    if !isempty(current_name)
-        aligned[current_name] = uppercase(String(take!(current_seq)))
-    end
-    aligned
 end
 
 # ─── Nucleotide counter (replaces Dict{Char,Int} in consensus hot loop) ───
@@ -225,46 +220,7 @@ function reservoir_sample(population::AbstractVector{T}, k::Int) where T
     sample
 end
 
-# ─── Affine gap alignment for describe_nt_change ───
-# Traceback state dispatched via AlignState; no if state == :M / :V / :H in the loop.
-
-abstract type AlignState end
-struct MState <: AlignState end
-struct VState <: AlignState end
-struct HState <: AlignState end
-
-initial_align_state(optimal::Int, M::Matrix{Int}, V::Matrix{Int}, H::Matrix{Int}, m::Int, n::Int) =
-    optimal == M[m+1, n+1] ? MState() : (optimal == V[m+1, n+1] ? VState() : HState())
-
-next_align_state(ms::Int, vs::Int, hs::Int) =
-    hs > ms && hs > vs ? HState() : (vs > ms ? VState() : MState())
-
-"""One traceback step: (ref_char, query_char, i_next, j_next, err_inc, next_state)."""
-function traceback_step end
-
-function traceback_step(::MState, i::Int, j::Int, M::Matrix{Int}, V::Matrix{Int}, H::Matrix{Int},
-                        ref::AbstractString, query::AbstractString, gap_open::Int, gap_extend::Int)
-    ref_c = ref[i-1]
-    query_c = query[j-1]
-    ms, vs, hs = M[i-1, j-1], V[i-1, j-1], H[i-1, j-1]
-    (ref_c, query_c, i - 1, j - 1, ref_c != query_c ? 1 : 0, next_align_state(ms, vs, hs))
-end
-
-function traceback_step(::VState, i::Int, j::Int, M::Matrix{Int}, V::Matrix{Int}, H::Matrix{Int},
-                        ref::AbstractString, query::AbstractString, gap_open::Int, gap_extend::Int)
-    ms = M[i-1, j] + gap_open
-    vs = V[i-1, j] + gap_extend
-    hs = H[i-1, j] + gap_open
-    (ref[i-1], '-', i - 1, j, 1, next_align_state(ms, vs, hs))
-end
-
-function traceback_step(::HState, i::Int, j::Int, M::Matrix{Int}, V::Matrix{Int}, H::Matrix{Int},
-                        ref::AbstractString, query::AbstractString, gap_open::Int, gap_extend::Int)
-    ms = M[i, j-1] + gap_open
-    vs = V[i, j-1] + gap_open
-    hs = H[i, j-1] + gap_extend
-    ('-', query[j-1], i, j - 1, 1, next_align_state(ms, vs, hs))
-end
+# ─── Pairwise alignment via BioAlignments ───
 
 struct Alignment
     ref_row::String
@@ -276,58 +232,39 @@ end
 """
     align_affine(ref, query; gap_open=-6, gap_extend=-1, mismatch=-3, match_score=1) -> Alignment
 
-Global alignment with affine gap penalties (BWA defaults).
-Traceback uses AlignState dispatch (MState, VState, HState).
+Global alignment with affine gap penalties (BWA-like defaults).
+Delegates to BioAlignments.pairalign; returns aligned strings with gaps for downstream use.
+
+The gap penalty convention is: gap of length k costs `gap_open + (k-1)*gap_extend`.
+BioAlignments uses `bio_gap_open + k*gap_extend`, so we adjust accordingly.
 """
 function align_affine(ref::AbstractString, query::AbstractString;
                      gap_open::Int = -6, gap_extend::Int = -1,
                      mismatch::Int = -3, match_score::Int = 1)
-    m, n = length(ref), length(query)
-    INF = typemin(Int) ÷ 2
+    ref_dna = BioSequences.LongDNA{4}(ref)
+    query_dna = BioSequences.LongDNA{4}(query)
 
-    M = zeros(Int, m + 1, n + 1)
-    H = zeros(Int, m + 1, n + 1)
-    V = zeros(Int, m + 1, n + 1)
+    bio_gap_open = gap_open - gap_extend
+    model = BioAlignments.AffineGapScoreModel(
+        match=match_score, mismatch=mismatch,
+        gap_open=bio_gap_open, gap_extend=gap_extend,
+    )
+    result = BioAlignments.pairalign(BioAlignments.GlobalAlignment(), query_dna, ref_dna, model)
+    aln = BioAlignments.alignment(result)
 
-    H[1, 1] = V[1, 1] = INF
-
-    for i in 2:m+1
-        M[i, 1] = INF
-        H[i, 1] = INF
-        V[i, 1] = gap_open + (i - 2) * gap_extend
-    end
-    for j in 2:n+1
-        M[1, j] = INF
-        H[1, j] = gap_open + (j - 2) * gap_extend
-        V[1, j] = INF
-    end
-
-    @inbounds for i in 2:m+1
-        rc = ref[i-1]
-        for j in 2:n+1
-            dscore = rc == query[j-1] ? match_score : mismatch
-            M[i, j] = dscore + max(M[i-1, j-1], V[i-1, j-1], H[i-1, j-1])
-            V[i, j] = max(H[i-1, j] + gap_open, V[i-1, j] + gap_extend, M[i-1, j] + gap_open)
-            H[i, j] = max(H[i, j-1] + gap_extend, V[i, j-1] + gap_open, M[i, j-1] + gap_open)
-        end
-    end
-
-    optimal = max(M[m+1, n+1], V[m+1, n+1], H[m+1, n+1])
-    state = initial_align_state(optimal, M, V, H, m, n)
-
-    ref_row = Char[]
-    query_row = Char[]
-    i, j = m + 1, n + 1
+    ref_chars = Char[]
+    query_chars = Char[]
     errors = 0
-
-    while i > 1 || j > 1
-        ref_c, query_c, i, j, err_inc, state = traceback_step(state, i, j, M, V, H, ref, query, gap_open, gap_extend)
-        push!(ref_row, ref_c)
-        push!(query_row, query_c)
-        errors += err_inc
+    for (seq_nuc, ref_nuc) in aln
+        sc = Char(seq_nuc)
+        rc = Char(ref_nuc)
+        push!(ref_chars, rc)
+        push!(query_chars, sc)
+        sc != rc && (errors += 1)
     end
 
-    Alignment(String(reverse(ref_row)), String(reverse(query_row)), optimal, errors)
+    Alignment(String(ref_chars), String(query_chars),
+              BioAlignments.score(result), errors)
 end
 
 # ─── describe_nt_change: column kinds dispatched ───

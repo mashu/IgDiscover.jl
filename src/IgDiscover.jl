@@ -1,5 +1,7 @@
 module IgDiscover
 
+import BioAlignments
+import BioSequences
 using CSV
 using CodecZlib
 using Clustering
