@@ -207,6 +207,40 @@ function germline_filter!(
 end
 
 """
+    deduplicate_by_consensus(filtered) -> DataFrame
+
+Keep one row per unique consensus sequence (same as Python igdiscover).
+Julia discovery emits multiple rows per gene (one per error-rate window or cluster);
+Python emits one per gene. Collapse duplicates by keeping the row with largest
+cluster_size per consensus, then first by name for tie-break.
+"""
+function deduplicate_by_consensus(filtered::DataFrame)
+    n = nrow(filtered)
+    n == 0 && return filtered
+    hasproperty(filtered, :consensus) || return filtered
+    hasproperty(filtered, :cluster_size) || return filtered
+
+    # For each consensus, keep the row index with max cluster_size (then first by name)
+    best_row = Dict{String,Int}()
+    for i in 1:n
+        seq = string(filtered.consensus[i])
+        csize = filtered.cluster_size[i]
+        name = hasproperty(filtered, :name) ? string(filtered.name[i]) : ""
+        if !haskey(best_row, seq)
+            best_row[seq] = i
+        else
+            j = best_row[seq]
+            csize_j = filtered.cluster_size[j]
+            name_j = hasproperty(filtered, :name) ? string(filtered.name[j]) : ""
+            if csize > csize_j || (csize == csize_j && name < name_j)
+                best_row[seq] = i
+            end
+        end
+    end
+    filtered[sort!(collect(values(best_row))), :]
+end
+
+"""
     germline_filter_to_fasta(filtered, path)
 
 Write filtered V gene candidates to a FASTA file.

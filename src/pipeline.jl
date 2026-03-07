@@ -182,6 +182,7 @@ function run_germline_filters(config::Config, iter_dir::String)
             write_fasta(fasta_path, FastaRecord[])
         else
             filtered, annotated = germline_filter!(candidates, criteria; whitelist=wl)
+            filtered = deduplicate_by_consensus(filtered)  # one row per unique sequence (match Python)
             write_table(joinpath(iter_dir, "new_V_$(prefix)germline.tab"), filtered)
             write_table(joinpath(iter_dir, "annotated_V_$(prefix)germline.tab"), annotated)
             germline_filter_to_fasta(filtered, fasta_path)

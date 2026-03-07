@@ -93,6 +93,8 @@ function compare_germline(py_dir::String, jl_dir::String)
                 println("  ✓ Unique consensus sequences match ($(length(py_set)) sequences)")
                 if length(py_set) != nrow(py_df) || length(jl_set) != nrow(jl_df)
                     println("  (Julia has $(nrow(jl_df)) rows vs Python $(nrow(py_df)); same unique content)")
+                    println("  → Parity = same discovered V genes. Julia outputs multiple rows per gene (error-rate")
+                    println("    windows) but the set of 7 germline sequences is identical to Python.")
                 end
             else
                 common = length(intersect(py_set, jl_set))

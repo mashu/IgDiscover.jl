@@ -39,7 +39,7 @@ export augment_table, parse_header
 export filter_table, FilterStats
 export discover_germline
 export discover_j_genes, discover_j_to_fasta
-export germline_filter!, germline_filter_to_fasta, Whitelist
+export germline_filter!, germline_filter_to_fasta, deduplicate_by_consensus, Whitelist
 export rename_genes
 export init_analysis, run_pipeline
 export group_reads
