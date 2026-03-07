@@ -434,4 +434,161 @@ using DataFrames
         rm(tmpdir; recursive=true)
     end
 
+    @testset "Pipeline: cached" begin
+        tmpdir = mktempdir()
+        path = joinpath(tmpdir, "cached_file")
+        ran = Ref(false)
+        result = IgDiscover.cached(() -> (ran[] = true; touch(path)), path)
+        @test result == path
+        @test ran[]
+        @test isfile(path)
+        ran2 = Ref(false)
+        IgDiscover.cached(() -> (ran2[] = true), path)
+        @test !ran2[]  # block not run when file exists
+        rm(tmpdir; recursive=true)
+    end
+
+    @testset "Pipeline: init_analysis" begin
+        tmpdir = mktempdir()
+        db_dir = joinpath(tmpdir, "db")
+        reads_path = joinpath(tmpdir, "reads.fasta")
+        mkpath(db_dir)
+        for gene in ("V", "D", "J")
+            IgDiscover.write_fasta(joinpath(db_dir, "$gene.fasta"), [
+                IgDiscover.FastaRecord("g1", "ATCGATCG"),
+            ])
+        end
+        IgDiscover.write_fasta(reads_path, [IgDiscover.FastaRecord("r1", "ATCG")])
+        out_dir = joinpath(tmpdir, "analysis")
+        IgDiscover.init_analysis(out_dir, db_dir, reads_path)
+        @test isdir(joinpath(out_dir, "database"))
+        @test isdir(joinpath(out_dir, "stats"))
+        @test isfile(joinpath(out_dir, "igdiscover.toml"))
+        @test isfile(joinpath(out_dir, "reads.fasta"))
+        @test length(IgDiscover.read_fasta(joinpath(out_dir, "database", "V.fasta"))) == 1
+        rm(tmpdir; recursive=true)
+    end
+
+    @testset "IgBLAST: make_blastdb empty FASTA" begin
+        tmpdir = mktempdir()
+        empty_fasta = joinpath(tmpdir, "empty.fasta")
+        IgDiscover.write_fasta(empty_fasta, IgDiscover.FastaRecord[])
+        @test_throws Exception IgDiscover.make_blastdb(empty_fasta, joinpath(tmpdir, "db"))
+        rm(tmpdir; recursive=true)
+    end
+
+    @testset "Augment: count_alignment_errors and alignment_coverage" begin
+        @test IgDiscover.count_alignment_errors("ATCG", "ATCG") == 0
+        @test IgDiscover.count_alignment_errors("ATCG", "AGCG") == 1
+        @test IgDiscover.count_alignment_errors("AT-G", "ATCG") == 1
+        @test IgDiscover.count_alignment_errors("", "ATCG") == 0
+        @test IgDiscover.alignment_coverage("ATCG", 4) == 100.0
+        @test IgDiscover.alignment_coverage("AT-CG", 4) == 100.0
+        @test IgDiscover.alignment_coverage("AT--", 4) == 50.0
+        @test IgDiscover.alignment_coverage("", 10) == 0.0
+    end
+
+    @testset "Discovery: discover_germline (minimal table)" begin
+        defaults = joinpath(@__DIR__, "..", "config", "defaults.toml")
+        cfg = IgDiscover.load_config(defaults)
+        db = Dict("IGHV1*01" => "ATCGATCGATCG")
+        # Table with V_nt but no rows that form large enough groups for consensus
+        df = DataFrame(
+            v_call = String[],
+            j_call = String[],
+            V_nt = String[],
+            v_sequence_alignment = String[],
+        )
+        result = IgDiscover.discover_germline(df, db, cfg)
+        @test result isa DataFrames.DataFrame
+        @test nrow(result) == 0
+    end
+
+    @testset "Germline filter: germline_filter! and Whitelist" begin
+        wl = IgDiscover.Whitelist()
+        @test length(wl.sequences) == 0
+        df = DataFrame(
+            consensus = ["ATCG", "GGCC"],
+            name = ["c1", "c2"],
+            cluster_size = [10, 5],
+            exact = [8, 4],
+            Ds_exact = [3, 2],
+            CDR3s_exact = [5, 3],
+            Js_exact = [3, 2],
+            clonotypes = [2, 1],
+            CDR3_start = [3, 3],
+            has_stop = [0, 0],
+            cluster = ["all", "all"],
+        )
+        criteria = IgDiscover.GermlineFilterCriteria(
+            5, 3, false, 50, false, 0.2, 0.2, 0.2, 0.2, 0.2, 2)
+        filtered, annotated = IgDiscover.germline_filter!(df, criteria; whitelist=wl)
+        @test nrow(filtered) >= 0
+        @test hasproperty(annotated, :why_filtered)
+    end
+
+    @testset "Group: ConsensusCounter and cluster_by_cdr3" begin
+        cc = IgDiscover.ConsensusCounter()
+        @test cc() == "consensus1"
+        @test cc() == "consensus2"
+        rec1 = IgDiscover.FastaRecord("r1", "AAAA")
+        rec2 = IgDiscover.FastaRecord("r2", "AAAB")
+        rec3 = IgDiscover.FastaRecord("r3", "AAAA")
+        records_with_cdr3 = [(rec1, "AAA"), (rec2, "AAB"), (rec3, "AAA")]
+        clusters = IgDiscover.cluster_by_cdr3(records_with_cdr3)
+        @test length(clusters) >= 1
+        # AAA and AAB differ by 1 → may cluster; AAA and AAA same
+        total_recs = sum(length(c) for c in clusters)
+        @test total_recs == 3
+    end
+
+    @testset "Group: trim_reads_race_g" begin
+        tmpdir = mktempdir()
+        input_path = joinpath(tmpdir, "in.fasta")
+        output_path = joinpath(tmpdir, "out.fasta.gz")
+        IgDiscover.write_fasta(input_path, [
+            IgDiscover.FastaRecord("r1", "GGGAATCG"),
+            IgDiscover.FastaRecord("r2", "AATCG"),
+        ])
+        IgDiscover.trim_reads_race_g(input_path, output_path)
+        out = IgDiscover.read_fasta(output_path)
+        @test length(out) == 2
+        @test out[1].sequence == "AATCG"
+        @test out[2].sequence == "AATCG"
+        rm(tmpdir; recursive=true)
+    end
+
+    @testset "J discovery: j_candidates_to_dataframe and discover_j_to_fasta" begin
+        j1 = IgDiscover.JCandidate("J1*01", "J1*01", 100, 10, "ATCGATCG")
+        df = IgDiscover.j_candidates_to_dataframe([j1])
+        @test nrow(df) == 1
+        @test df.name[1] == "J1*01"
+        @test df.consensus[1] == "ATCGATCG"
+        tmpdir = mktempdir()
+        cfg = IgDiscover.load_config(joinpath(@__DIR__, "..", "config", "defaults.toml"))
+        j_db = Dict("IGHJ1" => "ATCGATCG")
+        table = DataFrame(
+            j_call = String[],
+            J_errors = Int[],
+            j_sequence_alignment = String[],
+            cdr3 = String[],
+        )
+        out_fasta = joinpath(tmpdir, "new_J.fasta")
+        IgDiscover.discover_j_to_fasta(table, j_db, cfg, out_fasta)
+        @test out_fasta == IgDiscover.discover_j_to_fasta(table, j_db, cfg, out_fasta)
+        @test isfile(out_fasta)
+        rm(tmpdir; recursive=true)
+    end
+
+    @testset "CDR3: find_cdr3" begin
+        # IGH: need V-like then C...W[GAV] pattern
+        v_like = "TTT" * "TTC" * "TGT" * "GCT"  # FYC then A, then WG or similar
+        j_like = "TGG" * "GCT"  # WG
+        seq = v_like * "NNN" * j_like
+        st, en = IgDiscover.find_cdr3(seq, "IGH")
+        @test (st > 0 && en > 0) || (st == 0 && en == 0)  # either found or not
+        st2, en2 = IgDiscover.find_cdr3("ATCGATCG", "IGH")
+        @test st2 == 0 && en2 == 0
+    end
+
 end

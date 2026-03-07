@@ -2,3 +2,4 @@ data/*
 Manifest.toml
 docs/build/*
 results/*
+*.cov
