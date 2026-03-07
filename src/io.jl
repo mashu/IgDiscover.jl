@@ -63,26 +63,53 @@ function read_fasta_dict(path::AbstractString)
     Dict(r.name => r.sequence for r in read_fasta(path))
 end
 
-"""
-    allele_name_from_header(name)
+# ─── IMGT database sanitization ───
 
-Extract allele identifier from IMGT-style header (e.g. "J00256|IGHJ1*01|..." → "IGHJ1*01").
-Falls back to full name if no pipe.
+"""
+    allele_name_from_header(name) -> String
+
+Extract allele identifier from IMGT-style header.
+Examples:
+  "J00256|IGHJ1*01|Homo sapiens|F|..."  → "IGHJ1*01"
+  "IGHV1-18*01"                          → "IGHV1-18*01"
 """
 allele_name_from_header(name::AbstractString) =
-    (p = split(name, '|'); length(p) >= 2 ? p[2] : name)
+    (p = split(name, '|'); length(p) >= 2 ? String(p[2]) : String(name))
 
 """
-    write_fasta_allele_headers(path_in, path_out)
+    sanitize_imgt_sequence(seq) -> String
 
-Read FASTA from path_in and write to path_out with headers replaced by allele names
-(e.g. IGHV1-18*01, IGHD3-3*01, IGHJ1*01) so IgBLAST and downstream see clean identifiers.
+Remove IMGT gap characters (dots) from a nucleotide sequence and uppercase.
+IMGT databases use '.' to represent gaps in their numbering system;
+these must be removed before use with IgBLAST or alignment tools.
 """
-function write_fasta_allele_headers(path_in::AbstractString, path_out::AbstractString)
+sanitize_imgt_sequence(seq::AbstractString) = uppercase(replace(seq, "." => ""))
+
+"""
+    sanitize_imgt_record(record::FastaRecord) -> FastaRecord
+
+Clean an IMGT FASTA record: extract allele name from header and remove dots from sequence.
+"""
+sanitize_imgt_record(record::FastaRecord) =
+    FastaRecord(allele_name_from_header(record.name), sanitize_imgt_sequence(record.sequence))
+
+"""
+    write_sanitized_imgt(path_in, path_out)
+
+Read IMGT FASTA from path_in and write to path_out with:
+  - Headers replaced by allele names (e.g. IGHV1-18*01, IGHD3-3*01, IGHJ1*01)
+  - IMGT gap dots removed from sequences
+This ensures IgBLAST and downstream tools see clean identifiers and ungapped sequences.
+"""
+function write_sanitized_imgt(path_in::AbstractString, path_out::AbstractString)
     records = read_fasta(path_in)
-    cleaned = [FastaRecord(allele_name_from_header(r.name), r.sequence) for r in records]
+    cleaned = sanitize_imgt_record.(records)
+    # Remove empty sequences (can occur if IMGT entry is all gaps)
+    filter!(r -> !isempty(r.sequence), cleaned)
     write_fasta(path_out, cleaned)
 end
+
+# ─── FASTA writing ───
 
 """
     write_fasta(path, records)
@@ -121,6 +148,8 @@ function write_fasta_gz(path::AbstractString, records::Vector{FastaRecord})
         write_fasta(path, records)
     end
 end
+
+# ─── Assignment tables (TSV) ───
 
 """
     read_assignments(path) -> DataFrame

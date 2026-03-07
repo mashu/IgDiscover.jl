@@ -139,7 +139,6 @@ function germline_filter!(
     candidates.whitelist_diff = [haskey(whitelist.sequences, s) ? 0 : -1
                                   for s in candidates.consensus]
 
-    # Per-row filters
     mark_filtered!(candidates, candidates.CDR3s_exact .< criteria.unique_cdr3s,
                    "too_low_CDR3s_exact")
     mark_filtered!(candidates, candidates.Js_exact .< criteria.unique_js,
@@ -162,14 +161,12 @@ function germline_filter!(
 
     @info "$(sum(candidates.is_filtered .== 0)) remain after per-entry filtering"
 
-    # Build pairwise filter chain
     filters = CandidateFilter[IdenticalSequenceFilter()]
     criteria.cross_mapping_ratio > 0 && push!(filters, CrossMappingFilter(criteria.cross_mapping_ratio))
     criteria.clonotype_ratio     > 0 && push!(filters, ClonotypeRatioFilter(criteria.clonotype_ratio))
     criteria.exact_ratio         > 0 && push!(filters, ExactRatioFilter(criteria.exact_ratio))
     criteria.unique_d_ratio      > 0 && push!(filters, UniqueDRatioFilter(criteria.unique_d_ratio, criteria.unique_d_threshold))
 
-    # Build FilterCandidate snapshots
     has_db_diff = hasproperty(candidates, :database_diff)
     has_cdr3_start = hasproperty(candidates, :CDR3_start)
 
@@ -185,7 +182,6 @@ function germline_filter!(
         i,
     ) for i in 1:n]
 
-    # Pairwise: compare every passing candidate against every other
     for ref in fc
         candidates.is_filtered[ref.index] > 0 && continue
         for cand in fc

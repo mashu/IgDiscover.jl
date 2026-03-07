@@ -38,7 +38,6 @@ function run_pipeline(dir::AbstractString)
             @info "PCR bias correction active (barcode_length=$(config.barcode_length))"
             reads_path = group_reads(reads_path, "grouped.fasta.gz", config; limit=config.limit)
         elseif config.race_g
-            # Trim leading G even without barcode grouping
             reads_path = trim_reads_race_g(reads_path, "trimmed.fasta.gz"; limit=config.limit)
         end
 
@@ -65,14 +64,17 @@ function run_iteration(config::Config, iter_dir::String, reads_path::String, ite
     mkpath(joinpath(iter_dir, "database"))
     mkpath(joinpath(iter_dir, "stats"))
 
-    # Set up per-iteration database (iteration 1: clean headers to allele names for IgBLAST)
+    # Set up per-iteration database
+    # Iteration 1: sanitize IMGT headers (extract allele names) and remove dots from sequences
+    # Later iterations: use previous iteration's output directly
     db_dst = joinpath(iter_dir, "database")
     v_src = iteration == 1 ?
         joinpath("database", "V.fasta") :
         joinpath(@sprintf("iteration-%02d", iteration - 1), "new_V_pregermline.fasta")
+
     if iteration == 1
-        write_fasta_allele_headers(v_src, joinpath(db_dst, "V.fasta"))
-        write_fasta_allele_headers(joinpath("database", "D.fasta"), joinpath(db_dst, "D.fasta"))
+        write_sanitized_imgt(v_src, joinpath(db_dst, "V.fasta"))
+        write_sanitized_imgt(joinpath("database", "D.fasta"), joinpath(db_dst, "D.fasta"))
     else
         cp(v_src, joinpath(db_dst, "V.fasta"); force=true)
         cp(joinpath("database", "D.fasta"), joinpath(db_dst, "D.fasta"); force=true)
@@ -85,7 +87,7 @@ function run_iteration(config::Config, iter_dir::String, reads_path::String, ite
         joinpath("database", "J.fasta")
     end
     if iteration == 1
-        write_fasta_allele_headers(j_src, joinpath(db_dst, "J.fasta"))
+        write_sanitized_imgt(j_src, joinpath(db_dst, "J.fasta"))
     else
         cp(j_src, joinpath(db_dst, "J.fasta"); force=true)
     end

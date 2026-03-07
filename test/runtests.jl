@@ -34,14 +34,12 @@ using DataFrames
     end
 
     @testset "Edit distance thread safety" begin
-        # Verify thread-local buffers produce correct results under contention
         results = Vector{Int}(undef, 100)
         Threads.@threads for i in 1:100
             results[i] = IgDiscover.edit_distance("ABCDEF", "XBCDEY")
         end
         @test all(==(2), results)
 
-        # Varying lengths to stress buffer resizing
         results2 = Vector{Int}(undef, 50)
         Threads.@threads for i in 1:50
             s = repeat("A", i)
@@ -52,10 +50,8 @@ using DataFrames
     end
 
     @testset "Edit distance with maxdiff" begin
-        # maxdiff early termination
         @test IgDiscover.edit_distance("AAAA", "ZZZZ"; maxdiff=2) == 3
         @test IgDiscover.edit_distance("AAAA", "AABA"; maxdiff=5) == 1
-        # Length difference exceeds maxdiff
         @test IgDiscover.edit_distance("A", "ABCD"; maxdiff=1) == 2
     end
 
@@ -84,7 +80,6 @@ using DataFrames
         @test loaded[1].name == "g1"
         @test loaded[1].sequence == "ATCG"
 
-        # gzipped round-trip
         gz_path = joinpath(tmpdir, "test.fasta.gz")
         IgDiscover.write_fasta_gz(gz_path, records)
         loaded_gz = IgDiscover.read_fasta(gz_path)
@@ -94,9 +89,51 @@ using DataFrames
         d = IgDiscover.read_fasta_dict(path)
         @test d["g1"] == "ATCG"
 
-        # limit parameter
         loaded_lim = IgDiscover.read_fasta(path; limit=1)
         @test length(loaded_lim) == 1
+
+        rm(tmpdir; recursive=true)
+    end
+
+    @testset "IMGT sanitization" begin
+        # allele_name_from_header
+        @test IgDiscover.allele_name_from_header("J00256|IGHJ1*01|Homo sapiens|F|") == "IGHJ1*01"
+        @test IgDiscover.allele_name_from_header("M99641|IGHV1-18*01|Homo sapiens|F|V-REGION|") == "IGHV1-18*01"
+        @test IgDiscover.allele_name_from_header("IGHV1-18*01") == "IGHV1-18*01"
+        @test IgDiscover.allele_name_from_header("simple") == "simple"
+
+        # sanitize_imgt_sequence removes dots
+        @test IgDiscover.sanitize_imgt_sequence("ATG...CCC.GGG") == "ATGCCCGGG"
+        @test IgDiscover.sanitize_imgt_sequence("ATCG") == "ATCG"
+        @test IgDiscover.sanitize_imgt_sequence("...") == ""
+        @test IgDiscover.sanitize_imgt_sequence("atg..ccc") == "ATGCCC"
+
+        # sanitize_imgt_record
+        rec = IgDiscover.FastaRecord("M99641|IGHV1-18*01|Homo sapiens|F|", "atg...ccc.ggg")
+        cleaned = IgDiscover.sanitize_imgt_record(rec)
+        @test cleaned.name == "IGHV1-18*01"
+        @test cleaned.sequence == "ATGCCCGGG"
+
+        # Round-trip through write_sanitized_imgt
+        tmpdir = mktempdir()
+        imgt_path = joinpath(tmpdir, "imgt.fasta")
+        out_path = joinpath(tmpdir, "clean.fasta")
+
+        open(imgt_path, "w") do io
+            println(io, ">M99641|IGHV1-18*01|Homo sapiens|F|V-REGION|188..483|296 nt|1| | | | |296+24=320| | |")
+            println(io, "cagg...ttcagctggtgcag...tctggagct...gaggtg...aagaagcctggggcc")
+            println(io, ">X62106|IGHV1-18*04|Homo sapiens|F|V-REGION|188..483|296 nt|1| | | | |296+24=320| | |")
+            println(io, "cagg.ttcagctggtgcag.tctggagct")
+        end
+
+        IgDiscover.write_sanitized_imgt(imgt_path, out_path)
+        result = IgDiscover.read_fasta(out_path)
+        @test length(result) == 2
+        @test result[1].name == "IGHV1-18*01"
+        @test !occursin('.', result[1].sequence)
+        @test result[1].sequence == "CAGGTTCAGCTGGTGCAGTCTGGAGCTGAGGTGAAGAAGCCTGGGGCC"
+        @test result[2].name == "IGHV1-18*04"
+        @test result[2].sequence == "CAGGTTCAGCTGGTGCAGTCTGGAGCT"
 
         rm(tmpdir; recursive=true)
     end
@@ -143,7 +180,6 @@ using DataFrames
         @test IgDiscover.consensus_sequence(String[]) == ""
         @test IgDiscover.consensus_sequence(["ATCG"]; threshold=0.5) == "ATCG"
 
-        # Unanimous consensus
         seqs2 = ["ATCG", "ATCG", "ATCG"]
         @test IgDiscover.consensus_sequence(seqs2; threshold=0.7) == "ATCG"
     end
@@ -202,7 +238,6 @@ using DataFrames
         @test !isempty(IgDiscover.should_discard(IgDiscover.IdenticalSequenceFilter(), ref, cand, false))
         @test !isempty(IgDiscover.should_discard(IgDiscover.ExactRatioFilter(0.5), ref, cand, true))
 
-        # Whitelisted candidate should not be discarded by IdenticalSequenceFilter
         cand_wl = IgDiscover.FilterCandidate("ATCG", "g1*02", 1, 1, 1, 5, true, true, true, 4, 2)
         @test isempty(IgDiscover.should_discard(IgDiscover.IdenticalSequenceFilter(), ref, cand_wl, false))
     end
@@ -296,22 +331,20 @@ using DataFrames
         M, clusters = IgDiscover.cluster_sequences(seqs; minsize=1)
         @test size(M) == (3, 3)
         @test M[1, 1] == 0.0
-        @test M[1, 3] == 0.0  # identical sequences
+        @test M[1, 3] == 0.0
         @test M[1, 2] > 0.0
     end
 
     @testset "Validate FASTA" begin
         tmpdir = mktempdir()
 
-        # Valid file
         path = joinpath(tmpdir, "valid.fasta")
         IgDiscover.write_fasta(path, [
             IgDiscover.FastaRecord("a", "ATCG"),
             IgDiscover.FastaRecord("b", "GGCC"),
         ])
-        IgDiscover.validate_fasta(path)  # should not throw
+        IgDiscover.validate_fasta(path)
 
-        # Duplicate names
         dup_path = joinpath(tmpdir, "dup.fasta")
         IgDiscover.write_fasta(dup_path, [
             IgDiscover.FastaRecord("a", "ATCG"),

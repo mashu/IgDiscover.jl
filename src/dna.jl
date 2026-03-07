@@ -60,10 +60,6 @@ function has_stop(seq::AbstractString)
 end
 
 # ─── Thread-local edit distance buffers ───
-#
-# edit_distance is the hottest function in the package: called O(n²) in
-# distance_matrix and single_linkage. Pre-allocated per-thread row buffers
-# eliminate allocation pressure entirely in these loops.
 
 struct EditDistanceBuffers
     prev::Vector{Int}
@@ -79,7 +75,6 @@ function ensure_capacity!(buf::EditDistanceBuffers, n::Int)
     buf
 end
 
-# Lazy init: grows to match nthreads() on first access from each thread
 const EDIT_BUFFERS = EditDistanceBuffers[]
 const EDIT_BUFFERS_LOCK = ReentrantLock()
 

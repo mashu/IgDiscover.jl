@@ -27,13 +27,11 @@ function multialign(sequences::Dict{String,String};
         tmpin = tempname() * ".fa"
         tmpout = tempname() * ".afa"
         write(tmpin, fasta_str)
-        # Try MUSCLE 5 syntax first
         p = run(pipeline(`muscle -align $tmpin -output $tmpout`, stderr=devnull); wait=false)
         wait(p)
         result = if p.exitcode == 0 && isfile(tmpout) && filesize(tmpout) > 0
             read(tmpout, String)
         else
-            # Clean stale output before MUSCLE 3 fallback
             rm(tmpout; force=true)
             run(pipeline(`muscle -quiet -in $tmpin -out $tmpout`, stderr=devnull))
             read(tmpout, String)
@@ -70,10 +68,6 @@ end
 
 # ─── Nucleotide counter (replaces Dict{Char,Int} in consensus hot loop) ───
 
-"""
-Fixed-size counter for alignment columns: A, C, G, T, N, gap.
-Avoids Dict allocation in the consensus inner loop.
-"""
 mutable struct NucleotideCounter
     a::Int; c::Int; g::Int; t::Int; n::Int; gap::Int
 end
@@ -118,7 +112,6 @@ end
     consensus_sequence(aligned; threshold=0.7, ambiguous='N') -> String
 
 Compute a consensus from aligned sequences, allowing degraded 3' ends.
-Processes columns from 3'→5', then reverses — O(n) total.
 """
 function consensus_sequence(aligned::AbstractVector{String};
                            threshold::Float64 = 0.7,
@@ -167,9 +160,7 @@ function consensus_sequence(aligned::Dict{String,String}; kwargs...)
 end
 
 """
-    iterative_consensus(sequences::Vector{String};
-                       program="muscle-medium", threshold=0.6,
-                       subsample_size=200, maximum_subsample_size=1600) -> String
+    iterative_consensus(sequences; program, threshold, subsample_size, maximum_subsample_size) -> String
 
 Compute consensus by iteratively increasing subsample size until no N bases remain.
 """
@@ -229,7 +220,6 @@ function align_affine(ref::AbstractString, query::AbstractString;
     m, n = length(ref), length(query)
     INF = typemin(Int) ÷ 2
 
-    # Matrices: M=match/mismatch, H=horizontal gap (in ref), V=vertical gap (in query)
     M = zeros(Int, m + 1, n + 1)
     H = zeros(Int, m + 1, n + 1)
     V = zeros(Int, m + 1, n + 1)
@@ -299,7 +289,7 @@ function align_affine(ref::AbstractString, query::AbstractString;
 end
 
 """
-    describe_nt_change(ref::String, query::String) -> String
+    describe_nt_change(ref, query) -> String
 
 Describe nucleotide changes between ref and query using HGVS-like notation.
 """
@@ -313,14 +303,14 @@ function describe_nt_change(ref::AbstractString, query::AbstractString)
         if c1 == c2
             idx += 1
             i += 1
-        elseif c1 == '-'  # insertion
+        elseif c1 == '-'
             inserted = IOBuffer()
             while i <= length(aln.ref_row) && aln.ref_row[i] == '-'
                 write(inserted, aln.query_row[i])
                 i += 1
             end
             push!(changes, "$(idx-1)_$(idx)ins$(String(take!(inserted)))")
-        elseif c2 == '-'  # deletion
+        elseif c2 == '-'
             deleted = IOBuffer()
             start_idx = idx
             while i <= length(aln.ref_row) && aln.query_row[i] == '-'
@@ -329,7 +319,7 @@ function describe_nt_change(ref::AbstractString, query::AbstractString)
                 idx += 1
             end
             push!(changes, "$(start_idx)_$(idx-1)del$(String(take!(deleted)))")
-        else  # substitution
+        else
             push!(changes, "$(idx)$(c1)>$(c2)")
             idx += 1
             i += 1

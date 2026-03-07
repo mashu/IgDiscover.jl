@@ -114,7 +114,6 @@ end
                         sequence_type, species, penalty, threads, limit, chunksize)
 
 Run IgBLAST on a FASTA file, write AIRR TSV (gzipped) output.
-When `limit > 0`, only the first `limit` reads are processed.
 """
 function run_igblast_on_fasta(database_dir::AbstractString,
                              input_fasta::AbstractString,
@@ -147,7 +146,6 @@ function run_igblast_on_fasta(database_dir::AbstractString,
         end
     end
 
-    # Combine: keep header from first chunk, strip header from subsequent chunks
     io = open(output_path, "w")
     stream = GzipCompressorStream(io)
     for (i, result) in enumerate(results)

@@ -46,7 +46,7 @@ end
 """
     cluster_by_cdr3(records_with_cdr3, length_tolerance) -> Vector of clusters
 
-Single-linkage clustering: link CDR3s with Hamming distance ≤ 1, then split by read length.
+Single-linkage clustering: link CDR3s with Hamming distance <= 1, then split by read length.
 """
 function cluster_by_cdr3(
     records_with_cdr3::Vector{Tuple{FastaRecord,String}},
@@ -94,7 +94,7 @@ end
 """
     pick_group_representative(cluster, barcode, use_consensus, consensus_counter, group_by_cdr3)
 
-Choose a representative: 1-2 sequences → pick first; 3+ → consensus if unambiguous.
+Choose a representative: 1-2 sequences -> pick first; 3+ -> consensus if unambiguous.
 """
 function pick_group_representative(
     cluster::Vector{Tuple{FastaRecord,String}},
@@ -196,7 +196,6 @@ end
     trim_reads_race_g(input_path, output_path; limit) -> String
 
 Trim leading G nucleotides from reads (RACE protocol artifact).
-Used when race_g=true but barcode_length=0 (no grouping step).
 """
 function trim_reads_race_g(
     input_path::AbstractString,
@@ -210,6 +209,6 @@ function trim_reads_race_g(
     filter!(r -> !isempty(r.sequence), trimmed)
 
     write_fasta_gz(output_path, trimmed)
-    @info "Trimmed leading G from $(length(records)) reads → $(length(trimmed)) in $output_path"
+    @info "Trimmed leading G from $(length(records)) reads -> $(length(trimmed)) in $output_path"
     output_path
 end

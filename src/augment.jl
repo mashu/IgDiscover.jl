@@ -74,8 +74,7 @@ function query_position(
     -1
 end
 
-# Build short_id → full_name mapping for IMGT-style headers (e.g. M99641|IGHV1-18*01|...).
-# Registers: "part1_part2", "part2" (gene+allele), and gene-only so IgBLAST call styles all resolve.
+# Build short_id → full_name mapping for IMGT-style headers
 function build_short_id_map(db::Dict{String,String})
     out = Dict{String,String}()
     for name in keys(db)
@@ -84,18 +83,17 @@ function build_short_id_map(db::Dict{String,String})
         if length(parts) >= 2
             short = join(parts[1:2], "_")
             get!(out, short, name)
-            gene_allele = parts[2]  # e.g. IGHV1-18*01, IGHJ1*01
+            gene_allele = parts[2]
             get!(out, gene_allele, name)
             if occursin('*', gene_allele)
                 gene_only = first(split(gene_allele, '*'))
-                get!(out, gene_only, name)  # e.g. IGHV1-18, IGHJ1
+                get!(out, gene_only, name)
             end
         end
     end
     out
 end
 
-# From full IMGT header return short gene identifier (second pipe field: IGHV/IGHD/IGHJ style).
 full_to_short(full_name::AbstractString) =
     (p = split(full_name, '|'); length(p) >= 2 ? p[2] : full_name)
 
@@ -117,7 +115,6 @@ function augment_table(
     short_d = build_short_id_map(db_d)
     short_j = build_short_id_map(db_j)
 
-    # Precompute CDR3 anchor positions
     loci = ("IGH", "IGK", "IGL", "TRA", "TRB", "TRG", "TRD")
     v_cdr3_starts = Dict(locus => Dict{String,Int}() for locus in loci)
     j_cdr3_ends   = Dict(locus => Dict{String,Int}() for locus in loci)
@@ -135,13 +132,11 @@ function augment_table(
     n = nrow(airr_df)
     result = copy(airr_df)
 
-    # Strip % prefix from gene calls
     for col in (:v_call, :d_call, :j_call)
         hasproperty(result, col) || continue
         result[!, col] = [lstrip(coalesce(v, ""), '%') for v in result[!, col]]
     end
 
-    # Parse headers for count and barcode
     counts   = zeros(Int, n)
     barcodes = fill("", n)
     for i in 1:n
@@ -153,13 +148,11 @@ function augment_table(
     result.count   = counts
     result.barcode = barcodes
 
-    # SHM = 100 - identity
     result.V_SHM = [let v = col_float(result, :v_identity, i, NaN)
         isnan(v) ? 0.0 : 100.0 - v end for i in 1:n]
     result.J_SHM = [let v = col_float(result, :j_identity, i, NaN)
         isnan(v) ? 0.0 : 100.0 - v end for i in 1:n]
 
-    # Alignment error counts
     result.V_errors = [count_alignment_errors(
         col_str(result, :v_germline_alignment, i), col_str(result, :v_sequence_alignment, i)) for i in 1:n]
     result.D_errors = [count_alignment_errors(
@@ -167,7 +160,6 @@ function augment_table(
     result.J_errors = [count_alignment_errors(
         col_str(result, :j_germline_alignment, i), col_str(result, :j_sequence_alignment, i)) for i in 1:n]
 
-    # Gene coverage
     resolve_v(vc) = get(short_v, vc, vc)
     resolve_d(dc) = get(short_d, dc, dc)
     resolve_j(jc) = get(short_j, jc, jc)
@@ -182,7 +174,6 @@ function augment_table(
         col_str(result, :j_germline_alignment, i),
         get(db_j, resolve_j(col_str(result, :j_call, i)), "") |> length) for i in 1:n]
 
-    # Ensure CDR3/stop columns exist as mutable String vectors
     for col in (:cdr3, :cdr3_aa)
         hasproperty(result, col) || (result[!, col] = fill("", n))
         result[!, col] = Vector{String}(coalesce.(result[!, col], ""))
@@ -193,7 +184,6 @@ function augment_table(
     end
     result.V_CDR3_start = zeros(Int, n)
 
-    # CDR3 extraction from V/J anchor positions
     for i in 1:n
         vc     = col_str(result, :v_call, i)
         jc     = col_str(result, :j_call, i)
@@ -242,22 +232,18 @@ function augment_table(
         end
     end
 
-    # V_nt: ungapped V sequence alignment
     result.V_nt = hasproperty(result, :v_sequence_alignment) ?
         replace.(coalesce.(result.v_sequence_alignment, ""), "-" => "") :
         fill("", n)
 
-    # d_support: D-gene e-value
     hasproperty(result, :d_support) || (result.d_support = fill(Inf, n))
 
-    # Normalize v_call, j_call, d_call to short identifiers (e.g. IGHV1-18*01, IGHD1-1*01, IGHJ1*01)
     for col in (:v_call, :d_call, :j_call)
         hasproperty(result, col) || continue
         resolve = col === :v_call ? resolve_v : (col === :d_call ? resolve_d : resolve_j)
         result[!, col] = [full_to_short(resolve(coalesce(result[i, col], ""))) for i in 1:n]
     end
 
-    # Normalize stop_codon to "T"/"F"
     if !hasproperty(result, :stop_codon)
         result.stop_codon = fill("F", n)
     else

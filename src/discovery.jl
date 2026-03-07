@@ -164,30 +164,24 @@ end
 function discover_gene(gene::String, assignments::DataFrame, params::DiscoveryParams)
     set_discovery_seed!(gene, params.seed)
 
-    # Determine CDR3 start position (most common V_CDR3_start)
     cdr3_vals = filter(>(0), assignments.V_CDR3_start)
     cdr3_start_val = isempty(cdr3_vals) ? 0 : most_common(cdr3_vals)[1]
 
-    # V sequence up to (but not including) CDR3
     v_no_cdr3 = [cdr3_start_val > 0 && cdr3_start_val <= length(s) ?
                   s[1:cdr3_start_val] : s for s in assignments.V_nt]
 
-    # Precompute index: v_no_cdr3 sequence → row indices (for fast exact-match lookup)
     v_no_cdr3_index = Dict{String,Vector{Int}}()
     for (i, seq) in enumerate(v_no_cdr3)
         push!(get!(v_no_cdr3_index, seq, Int[]), i)
     end
 
-    # Precompute index: full V_nt → row indices
     v_nt_index = Dict{String,Vector{Int}}()
     for (i, seq) in enumerate(assignments.V_nt)
         push!(get!(v_nt_index, seq, Int[]), i)
     end
 
-    # Collect sibling groups: (consensus_seq, label, row_indices)
     siblings = Tuple{String,String,Vector{Int}}[]
 
-    # Window-based groups
     for (left, right) in params.windows
         indices = findall(i -> left <= assignments.V_SHM[i] < right, 1:nrow(assignments))
         length(indices) < MINGROUPSIZE && continue
@@ -198,7 +192,6 @@ function discover_gene(gene::String, assignments::DataFrame, params::DiscoveryPa
         push!(siblings, (seq, label, indices))
     end
 
-    # Cluster-based groups
     if params.do_cluster && nrow(assignments) >= MINGROUPSIZE
         sample_idx = reservoir_sample(collect(1:nrow(assignments)), params.cluster_subsample_size)
         _, cluster_ids = cluster_sequences(v_no_cdr3[sample_idx]; minsize=MINGROUPSIZE)
@@ -218,7 +211,6 @@ function discover_gene(gene::String, assignments::DataFrame, params::DiscoveryPa
         end
     end
 
-    # Re-add database sequence if expressed but not yet captured
     db_seq = get(params.database, gene, "")
     if !isempty(db_seq) && !any(s == db_seq for (s, _, _) in siblings)
         exact_idx = findall(==(0), assignments.V_errors)
@@ -228,7 +220,6 @@ function discover_gene(gene::String, assignments::DataFrame, params::DiscoveryPa
         end
     end
 
-    # Build Candidate for each sibling group
     candidates = Candidate[]
     for (seq, sib_name, sib_indices) in siblings
         isempty(seq) && continue
@@ -238,7 +229,6 @@ function discover_gene(gene::String, assignments::DataFrame, params::DiscoveryPa
         v_no_cdr3_seq = cdr3_start_val > 0 && cdr3_start_val <= length(seq) ?
             seq[1:cdr3_start_val] : seq
 
-        # Use precomputed index for O(1) exact-match lookup
         exact_idx    = get(v_no_cdr3_index, v_no_cdr3_seq, Int[])
         sib_group    = assignments[sib_indices, :]
         exact_group  = assignments[exact_idx, :]
@@ -257,7 +247,6 @@ function discover_gene(gene::String, assignments::DataFrame, params::DiscoveryPa
         db_diff    = haskey(params.database, gene) ? edit_distance(seq, params.database[gene]) : -1
         db_changes = db_diff > 0 ? describe_nt_change(params.database[gene], seq) : ""
 
-        # Skip novel alleles supported by only 1 sequence
         db_diff > 0 && info_exact.count < 2 && continue
 
         seq_id     = db_diff == 0 ? gene : unique_name(gene, seq)
@@ -297,13 +286,11 @@ function discover_germline(
         @info "$(nrow(table)) rows remain after J%SHM=0 filter"
     end
 
-    # Ensure V_nt column
     if !hasproperty(table, :V_nt) && hasproperty(table, :v_sequence_alignment)
         table.V_nt = replace.(coalesce.(table.v_sequence_alignment, ""), "-" => "")
     end
     hasproperty(table, :V_nt) || error("Table must have V_nt or v_sequence_alignment column")
 
-    # Defaults for optional columns
     for col in (:cdr3, :barcode, :j_call, :d_call, :locus)
         hasproperty(table, col) || (table[!, col] = fill("", nrow(table)))
     end

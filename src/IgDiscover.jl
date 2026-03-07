@@ -31,6 +31,7 @@ include("pipeline.jl")
 export Config, load_config, write_default_config
 export PreprocessingFilter, GermlineFilterCriteria, JDiscoveryConfig
 export FastaRecord, read_fasta, read_fasta_dict, write_fasta, write_fasta_gz
+export sanitize_imgt_record, sanitize_imgt_sequence, write_sanitized_imgt
 export read_assignments, write_table, write_table_gz
 export multialign, consensus_sequence, iterative_consensus
 export run_igblast_on_fasta, make_blastdb

@@ -10,11 +10,9 @@ function distance_matrix(sequences::Vector{String}; band::Float64 = 0.2)
     n = length(sequences)
     maxdiff = isempty(sequences) ? 0 : maximum(s -> round(Int, length(s) * band), sequences)
 
-    # Deduplicate to avoid redundant comparisons
     unique_seqs = unique(sequences)
     nu = length(unique_seqs)
 
-    # Compute pairwise distances for unique sequences (threaded)
     unique_dist = zeros(Int, nu, nu)
     pairs = [(i, j) for i in 1:nu for j in (i+1):nu]
     Threads.@threads for idx in eachindex(pairs)
@@ -24,7 +22,6 @@ function distance_matrix(sequences::Vector{String}; band::Float64 = 0.2)
         unique_dist[j, i] = d
     end
 
-    # Map unique sequences to indices for O(1) lookup
     seq_to_uid = Dict{String,Int}(s => i for (i, s) in enumerate(unique_seqs))
 
     M = zeros(Float64, n, n)
@@ -57,9 +54,6 @@ end
 
 """
 Assign cluster IDs using igdiscover's distance-ratio heuristic.
-
-Walk merge tree from highest to lowest distance. When ratio prev/current drops
-below 0.8 and both subtrees have ≥ minsize leaves, assign a cluster.
 """
 function assign_igdiscover_clusters!(clusters::Vector{Int},
                                     hcl::Clustering.Hclust,
@@ -67,8 +61,6 @@ function assign_igdiscover_clusters!(clusters::Vector{Int},
     nmerges = length(hcl.heights)
     nmerges == 0 && return
 
-    # Pre-build leaf sets bottom-up (each merge step unions its children)
-    # node_leaves[step] contains the leaf indices for the subtree at that merge
     node_leaves = Vector{Vector{Int}}(undef, nmerges)
 
     for step in 1:nmerges
@@ -117,7 +109,7 @@ end
 
 function find_root!(uf::UnionFind{T}, x::T) where T
     while uf.parent[x] != x
-        uf.parent[x] = uf.parent[uf.parent[x]]  # path compression
+        uf.parent[x] = uf.parent[uf.parent[x]]
         x = uf.parent[x]
     end
     x
