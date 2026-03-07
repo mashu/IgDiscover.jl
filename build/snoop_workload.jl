@@ -123,4 +123,14 @@ IgDiscover.call_clonotypes(ct_df)
 
 rm(tmpdir; recursive=true, force=true)
 
+# ── App entry point (for standalone build) ──
+
+let orig = copy(ARGS)
+    empty!(ARGS)
+    push!(ARGS, "version")
+    IgDiscover.julia_main()
+    empty!(ARGS)
+    append!(ARGS, orig)
+end
+
 @info "Snoop workload completed successfully"

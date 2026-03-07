@@ -28,7 +28,7 @@ if build_app
     create_app(
         PROJECT_DIR,
         joinpath(BUILD_DIR, "IgDiscover");
-        executables=["igdiscover" => "bin/igdiscover.jl"],
+        executables=["igdiscover" => "julia_main"],
         precompile_execution_file=SNOOP_SCRIPT,
         force=true,
         include_lazy_artifacts=true,

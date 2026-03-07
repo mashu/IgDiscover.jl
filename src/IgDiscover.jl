@@ -12,6 +12,7 @@ using PrecompileTools
 using Printf
 using Random
 using SHA
+using ArgParse
 using TOML
 using TranscodingStreams
 
@@ -32,6 +33,7 @@ include("germlinefilter.jl")
 include("rename.jl")
 include("clonotypes.jl")
 include("pipeline.jl")
+include("cli.jl")
 
 export Config, load_config, write_default_config
 export PreprocessingFilter, GermlineFilterCriteria, JDiscoveryConfig
