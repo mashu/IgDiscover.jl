@@ -166,20 +166,3 @@ function unique_name(name::AbstractString, seq::AbstractString)
     base = first(split(name, "_S"; limit=2))
     base * "_" * sequence_hash(seq)
 end
-
-"""
-    safe_divide(x, y) -> Float64
-
-x/y, returning 0.0 when y is zero.
-"""
-safe_divide(x, y) = y == 0 ? 0.0 : Float64(x) / Float64(y)
-
-"""
-    is_same_gene(name1, name2) -> Bool
-
-Check whether two gene names are alleles of the same gene (share prefix before '*').
-"""
-function is_same_gene(name1::AbstractString, name2::AbstractString)
-    occursin('*', name1) && occursin('*', name2) &&
-        first(split(name1, '*')) == first(split(name2, '*'))
-end

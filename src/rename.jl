@@ -19,7 +19,6 @@ function rename_genes(
     isempty(discovered) && (write_fasta(output_path, FastaRecord[]); return)
 
     database = read_fasta(database_path)
-    db_seqs = Dict(r.name => r.sequence for r in database)
 
     # For each discovered sequence, find the closest database gene
     closest = Dict{String,Vector{Tuple{String,String,Int}}}()  # gene_base → [(name, seq, dist)]
@@ -46,7 +45,7 @@ function rename_genes(
     renamed = FastaRecord[]
     for (gene_base, alleles) in sort!(collect(closest); by=first)
         sort!(alleles; by=x -> x[3])  # sort by distance to database
-        for (i, (orig_name, seq, dist)) in enumerate(alleles)
+        for (i, (_, seq, _)) in enumerate(alleles)
             allele_num = @sprintf("%02d", i)
             new_name = "$(gene_base)*$(allele_num)"
             push!(renamed, FastaRecord(new_name, seq))

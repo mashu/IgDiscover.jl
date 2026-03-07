@@ -4,6 +4,26 @@ const MIN_CONSENSUS_SEQUENCES = 3
 const GROUP_CONSENSUS_THRESHOLD = 0.501
 const CDR3_LENGTH_TOLERANCE = 2
 
+# ─── ConsensusCounter functor (replaces Ref{Int}) ───
+
+"""
+    ConsensusCounter()
+
+Callable that generates unique consensus sequence names.
+Each call increments the internal counter and returns "consensusN".
+"""
+mutable struct ConsensusCounter
+    count::Int
+    ConsensusCounter() = new(0)
+end
+
+function (cc::ConsensusCounter)()
+    cc.count += 1
+    "consensus$(cc.count)"
+end
+
+# ─── Helpers ───
+
 """
     extract_barcode(record, barcode_length) -> (barcode, unbarcoded_record)
 
@@ -92,7 +112,7 @@ function make_group_record(name::String, sequence::String, barcode::String, size
 end
 
 """
-    pick_group_representative(cluster, barcode, use_consensus, consensus_counter, group_by_cdr3)
+    pick_group_representative(cluster, barcode, use_consensus, counter, group_by_cdr3)
 
 Choose a representative: 1-2 sequences -> pick first; 3+ -> consensus if unambiguous.
 """
@@ -100,7 +120,7 @@ function pick_group_representative(
     cluster::Vector{Tuple{FastaRecord,String}},
     barcode::String,
     use_consensus::Bool,
-    consensus_counter::Ref{Int},
+    counter::ConsensusCounter,
     group_by_cdr3::Bool,
 )
     n = length(cluster)
@@ -119,8 +139,7 @@ function pick_group_representative(
         return make_group_record(first(split(rec.name, r"\s+")), rec.sequence, barcode, n, cdr3_label)
     end
 
-    consensus_counter[] += 1
-    make_group_record("consensus$(consensus_counter[])", cons, barcode, n, cdr3_label)
+    make_group_record(counter(), cons, barcode, n, cdr3_label)
 end
 
 function simple_consensus_for_group(sequences::Vector{String}; threshold::Float64=GROUP_CONSENSUS_THRESHOLD)
@@ -159,7 +178,7 @@ function group_reads(
     end
     @info "Grouping: $(length(records)) reads, $too_short too short, $(length(barcode_groups)) unique barcodes"
 
-    consensus_counter = Ref(0)
+    counter = ConsensusCounter()
     out_records = FastaRecord[]
 
     for barcode in sort!(collect(keys(barcode_groups)))
@@ -183,7 +202,7 @@ function group_reads(
 
         for cluster in clusters
             push!(out_records, pick_group_representative(
-                cluster, barcode, config.barcode_consensus, consensus_counter, group_by_cdr3))
+                cluster, barcode, config.barcode_consensus, counter, group_by_cdr3))
         end
     end
 

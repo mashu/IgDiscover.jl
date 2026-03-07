@@ -8,8 +8,6 @@ struct JCandidate
     source::String
     exact::Int
     CDR3s_exact::Int
-    allele_ratio::Float64
-    cross_mapping_ratio::Float64
     consensus::String
 end
 
@@ -67,8 +65,7 @@ function discover_j_genes(
 
         push!(candidates, JCandidate(
             namer(seq_id), gene,
-            nrow(exact_group), unique_cdr3s,
-            0.0, 0.0, cons))
+            nrow(exact_group), unique_cdr3s, cons))
     end
 
     isempty(candidates) && return DataFrame()

@@ -13,6 +13,7 @@ using SHA
 using TOML
 using TranscodingStreams
 
+include("utils.jl")
 include("dna.jl")
 include("config.jl")
 include("io.jl")
@@ -63,6 +64,14 @@ export ClonotypeCaller, call_clonotypes
     defaults_path = joinpath(@__DIR__, "..", "config", "defaults.toml")
 
     @compile_workload begin
+        # Shared utilities
+        tallies(["a", "b", "a"])
+        most_common(["a", "b", "a"])
+        safe_divide(10, 5)
+        safe_divide(1, 0)
+        is_same_gene("IGHV1-2*01", "IGHV1-2*02")
+        from_toml(PreprocessingFilter, Dict("v_coverage" => 90.0, "j_coverage" => 60.0, "v_evalue" => 1e-3))
+
         # DNA utilities
         edit_distance("ATCGATCG", "ATCGATCA")
         edit_distance("ATCGATCG", "ATCGATCA"; maxdiff=2)
@@ -100,9 +109,6 @@ export ClonotypeCaller, call_clonotypes
 
         # Alignment
         align_affine("ATCG", "ATCA")
-
-        # Clustering helpers
-        tallies(["a", "b", "a"])
 
         # Sanitization
         sanitize_imgt_sequence("ATG...CCC")

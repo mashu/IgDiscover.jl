@@ -1,4 +1,6 @@
 # V gene candidate discovery — core algorithm
+#
+# tallies() and most_common() are in utils.jl (shared across modules).
 
 const MINGROUPSIZE = 5
 const MINEXPRESSED = 10
@@ -75,20 +77,6 @@ function (ng::NameGenerator)(name::String)
 end
 
 # ─── Helpers ───
-
-function tallies(v::AbstractVector)
-    d = Dict{eltype(v),Int}()
-    for x in v
-        d[x] = get(d, x, 0) + 1
-    end
-    d
-end
-
-function most_common(v::AbstractVector)
-    t = tallies(v)
-    isempty(t) && return (first(v), 0)
-    first(sort!(collect(t); by=last, rev=true))
-end
 
 function set_discovery_seed!(gene::String, base_seed::Int)
     h = bytes2hex(sha256(Vector{UInt8}(codeunits(gene))))[end-7:end]

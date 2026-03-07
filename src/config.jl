@@ -3,19 +3,13 @@
 """
     PreprocessingFilter
 
-Filter thresholds for assignment tables: `v_coverage`, `j_coverage` (%%), and `v_evalue` (V gene E-value).
+Filter thresholds for assignment tables: `v_coverage`, `j_coverage` (%), and `v_evalue` (V gene E-value).
 """
 struct PreprocessingFilter
     v_coverage::Float64
     j_coverage::Float64
     v_evalue::Float64
 end
-
-PreprocessingFilter(d::Dict) = PreprocessingFilter(
-    Float64(d["v_coverage"]),
-    Float64(d["j_coverage"]),
-    Float64(d["v_evalue"]),
-)
 
 """
     GermlineFilterCriteria
@@ -37,20 +31,6 @@ struct GermlineFilterCriteria
     unique_d_threshold::Int
 end
 
-GermlineFilterCriteria(d::Dict) = GermlineFilterCriteria(
-    Int(d["unique_cdr3s"]),
-    Int(d["unique_js"]),
-    Bool(d["whitelist"]),
-    Int(d["cluster_size"]),
-    Bool(d["allow_stop"]),
-    Float64(d["cross_mapping_ratio"]),
-    Float64(d["clonotype_ratio"]),
-    Float64(d["exact_ratio"]),
-    Float64(d["cdr3_shared_ratio"]),
-    Float64(d["unique_d_ratio"]),
-    Int(d["unique_d_threshold"]),
-)
-
 """
     JDiscoveryConfig
 
@@ -61,12 +41,6 @@ struct JDiscoveryConfig
     cross_mapping_ratio::Float64
     propagate::Bool
 end
-
-JDiscoveryConfig(d::Dict) = JDiscoveryConfig(
-    Float64(d["allele_ratio"]),
-    Float64(d["cross_mapping_ratio"]),
-    Bool(d["propagate"]),
-)
 
 """
     Config
@@ -124,7 +98,7 @@ function load_config()
 end
 
 merge_value(existing::Dict, incoming::Dict) = merge!(existing, incoming)
-merge_value(existing, incoming) = incoming
+merge_value(_, incoming) = incoming
 
 function merge_config(defaults::Dict, user::Dict)
     result = deepcopy(defaults)
@@ -134,6 +108,12 @@ function merge_config(defaults::Dict, user::Dict)
     result
 end
 
+"""
+    parse_config(d::Dict) -> Config
+
+Convert a merged TOML dictionary into a fully-typed `Config`.
+Uses `from_toml` for nested structs, eliminating manual field extraction.
+"""
 function parse_config(d::Dict)
     Config(
         get(d, "species", ""),
@@ -161,10 +141,10 @@ function parse_config(d::Dict)
         Bool(get(d, "race_g", false)),
         Int(get(d, "seed", 1)),
         Int(get(d, "exact_copies", 0)),
-        PreprocessingFilter(d["preprocessing_filter"]),
-        GermlineFilterCriteria(d["pre_germline_filter"]),
-        GermlineFilterCriteria(d["germline_filter"]),
-        JDiscoveryConfig(d["j_discovery"]),
+        from_toml(PreprocessingFilter, d["preprocessing_filter"]),
+        from_toml(GermlineFilterCriteria, d["pre_germline_filter"]),
+        from_toml(GermlineFilterCriteria, d["germline_filter"]),
+        from_toml(JDiscoveryConfig, d["j_discovery"]),
     )
 end
 

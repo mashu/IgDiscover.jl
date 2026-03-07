@@ -10,16 +10,24 @@ struct FastaRecord
     sequence::String
 end
 
-# Minimal IO wrapper that prepends one byte so we can peek and still pass stream to reader
-mutable struct PrependIO <: IO
-    first::Union{UInt8,Nothing}
+# Type-stable IO wrapper: prepends one byte so we can peek format and still pass stream to reader
+mutable struct PeekableIO <: IO
+    byte::UInt8
+    consumed::Bool
     rest::IO
 end
-Base.read(io::PrependIO, ::Type{UInt8}) = io.first !== nothing ? (b = io.first; io.first = nothing; b) : read(io.rest, UInt8)
-Base.eof(io::PrependIO) = io.first === nothing && eof(io.rest)
-Base.close(io::PrependIO) = close(io.rest)
-Base.isopen(io::PrependIO) = isopen(io.rest)
-Base.bytesavailable(io::PrependIO) = (io.first !== nothing ? 1 : 0) + bytesavailable(io.rest)
+
+function Base.read(io::PeekableIO, ::Type{UInt8})
+    if !io.consumed
+        io.consumed = true
+        return io.byte
+    end
+    read(io.rest, UInt8)
+end
+Base.eof(io::PeekableIO) = io.consumed && eof(io.rest)
+Base.close(io::PeekableIO) = close(io.rest)
+Base.isopen(io::PeekableIO) = isopen(io.rest)
+Base.bytesavailable(io::PeekableIO) = (!io.consumed ? 1 : 0) + bytesavailable(io.rest)
 
 """
     read_fasta(path; limit=0) -> Vector{FastaRecord}
@@ -34,7 +42,7 @@ function read_fasta(path::AbstractString; limit::Int=0)
     first_chunk = read(raw, 1)
     isempty(first_chunk) && (close(raw); return records)
     first_byte = only(first_chunk)
-    stream = PrependIO(first_byte, raw)
+    stream = PeekableIO(first_byte, false, raw)
     if first_byte == UInt8('>')
         reader = FASTA.Reader(stream)
         for record in reader
@@ -109,7 +117,6 @@ This ensures IgBLAST and downstream tools see clean identifiers and ungapped seq
 function write_sanitized_imgt(path_in::AbstractString, path_out::AbstractString)
     records = read_fasta(path_in)
     cleaned = sanitize_imgt_record.(records)
-    # Remove empty sequences (can occur if IMGT entry is all gaps)
     filter!(r -> !isempty(r.sequence), cleaned)
     write_fasta(path_out, cleaned)
 end
@@ -174,6 +181,8 @@ end
 
 """
     write_table(path, df)
+
+Write DataFrame as plain TSV.
 """
 function write_table(path::AbstractString, df::DataFrame)
     CSV.write(path, df; delim='\t')
