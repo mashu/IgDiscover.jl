@@ -175,8 +175,7 @@ function germline_filter!(
         candidates.clonotypes[i], candidates.exact[i], candidates.Ds_exact[i],
         candidates.cluster_size[i],
         candidates.whitelist_diff[i] == 0,
-        has_db_diff && !ismissing(candidates.database_diff[i]) &&
-            candidates.database_diff[i] == 0,
+        has_db_diff && coalesce(candidates.database_diff[i], -1) == 0,
         occursin("all", candidates.cluster[i]) || occursin("db", candidates.cluster[i]),
         has_cdr3_start ? candidates.CDR3_start[i] : 10000,
         i,

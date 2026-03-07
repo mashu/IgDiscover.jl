@@ -1,0 +1,6 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+IgDiscover = "d834826c-b5e1-44fa-8035-9b60f2b560d4"
+
+[compat]
+Documenter = "1"

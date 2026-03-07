@@ -107,14 +107,13 @@ function load_config()
     load_config(path)
 end
 
+merge_value(existing::Dict, incoming::Dict) = merge!(existing, incoming)
+merge_value(existing, incoming) = incoming
+
 function merge_config(defaults::Dict, user::Dict)
     result = deepcopy(defaults)
     for (k, v) in user
-        if v isa Dict && haskey(result, k) && result[k] isa Dict
-            merge!(result[k], v)
-        else
-            result[k] = v
-        end
+        result[k] = haskey(result, k) ? merge_value(result[k], v) : v
     end
     result
 end

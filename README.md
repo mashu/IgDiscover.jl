@@ -1,151 +1,88 @@
 # IgDiscover.jl
 
-Julia port of [IgDiscover](https://gitlab.com/gkhlab/igdiscover22), a tool for analyzing antibody repertoires and discovering new V genes from high-throughput sequencing reads.
+[![CI](https://github.com/mashu/IgDiscover.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/mashu/IgDiscover.jl/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/mashu/IgDiscover.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/mashu/IgDiscover.jl)
+[![Stable Docs](https://img.shields.io/badge/docs-stable-blue.svg)](https://mashu.github.io/IgDiscover.jl/stable/)
+[![Dev Docs](https://img.shields.io/badge/docs-dev-blue.svg)](https://mashu.github.io/IgDiscover.jl/dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Parity](https://img.shields.io/badge/parity-verified-brightgreen.svg)](#parity-testing)
 
-## Design Principles
+A Julia port of [IgDiscover](https://gitlab.com/gkhlab/igdiscover22) for individualized V gene database construction from high-throughput antibody sequencing data.
 
-- **Result parity** with Python igdiscover, particularly `new_V_germline.tsv` and `filtered.tsv.gz`
-- **Same external tools**: IgBLAST, MUSCLE, PEAR — no reimplementation of bioinformatics tools
-- **Julia idioms**: multiple dispatch, concrete parametric types, functors, TOML config
-- **No anti-patterns**: zero `try/catch`, `Any`, `isa()`, `typeof()`, `_`-prefixed functions
-- **Performance**: thread-local buffers for hot-path edit distance, precomputed hash indices for exact-match lookups, zero-allocation nucleotide counting in consensus
+## Quick Start
+
+```julia
+using IgDiscover
+
+# Initialize analysis directory
+init_analysis("my_analysis", "path/to/database", "reads.fasta.gz")
+
+# Run the full pipeline
+run_pipeline("my_analysis")
+```
 
 ## Installation
 
 ```julia
 using Pkg
-Pkg.develop(path="/path/to/IgDiscover.jl")
+Pkg.add(url="https://github.com/mashu/IgDiscover.jl")
 ```
 
 ### External Dependencies
 
-These must be in your `PATH`:
+IgDiscover.jl relies on the same external tools as the Python version:
 
 | Tool | Purpose | Install |
 |------|---------|---------|
-| `igblastn` | V/D/J gene assignment | [NCBI IgBLAST](https://ncbi.github.io/igblast/) |
-| `makeblastdb` | Build BLAST databases | Ships with IgBLAST |
-| `muscle` | Multiple sequence alignment | [MUSCLE](https://drive5.com/muscle/) |
-| `pear` | Paired-end read merging | [PEAR](https://github.com/tseemann/PEAR) |
+| `igblastn` + `makeblastdb` | V/D/J gene assignment | `conda install -c bioconda igblast` |
+| `muscle` | Multiple sequence alignment | `conda install -c bioconda muscle` |
+| `pear` (optional) | Read merging | `conda install -c bioconda pear` |
 
-Consider using [IgBLAST.jl](https://github.com/mashu/IgBLAST.jl) for automatic IgBLAST binary management.
+## Features
 
-## Quick Start
+- **Germline V gene discovery** — iterative consensus with SHM-window and cluster-based candidate generation
+- **J gene discovery** — novel J allele identification with cross-mapping filter
+- **Preprocessing** — AIRR augmentation, coverage/evalue filtering, IMGT database sanitization
+- **Clonotype calling** — V+J+CDR3 single-linkage clustering
+- **PCR bias correction** — barcode grouping with consensus
+- **Gene renaming** — canonical allele naming based on database proximity
+- **TOML configuration** — with sensible defaults, easy to override
 
-### Initialize an Analysis
+### Performance
 
-```julia
-using IgDiscover
+- Threaded IgBLAST execution (chunked, one process per chunk)
+- Threaded O(n²) pairwise distance matrix computation
+- Thread-local pre-allocated edit distance buffers (zero-allocation hot loops)
+- `NucleotideCounter` struct replacing `Dict{Char,Int}` in consensus
+- PrecompileTools workload for reduced first-call latency
+- Optional PackageCompiler sysimage for near-instant startup
 
-init_analysis("my_analysis",           # output directory
-              "path/to/database",      # directory with V.fasta, D.fasta, J.fasta
-              "path/to/reads.fasta.gz") # merged reads
-```
+## Configuration
 
-### Edit Configuration
+The pipeline uses TOML configuration. See [`config/defaults.toml`](config/defaults.toml) for all options:
 
 ```toml
-# my_analysis/igdiscover.toml
+species = ""
+sequence_type = "Ig"
 iterations = 1
-seed = 1
+limit = 0                     # 0 = process all reads
+consensus_threshold = 60.0
+
+[preprocessing_filter]
+v_coverage = 90.0
+j_coverage = 60.0
+v_evalue = 1e-3
 
 [germline_filter]
 unique_cdr3s = 5
 unique_js = 3
 cluster_size = 50
+cross_mapping_ratio = 0.02
 ```
 
-### Run the Pipeline
+## Parity Testing
 
-```julia
-run_pipeline("my_analysis")
-```
-
-**Output files** (per iteration, e.g. `iteration-01/`):
-
-| File | Description |
-|------|-------------|
-| `airr.tsv.gz` | IgBLAST AIRR-format assignments |
-| `assigned.tsv.gz` | Augmented table with IgDiscover columns |
-| `filtered.tsv.gz` | Rows passing preprocessing filter |
-| `candidates.tab` | V gene candidates from discovery |
-| `new_V_pregermline.fasta` | Pre-germline filtered sequences |
-| `new_V_germline.fasta` | **Final discovered V germline sequences** |
-| `new_J.fasta` | Discovered J genes |
-
-### IMGT Database Handling
-
-IgDiscover.jl automatically sanitizes IMGT-format databases during initialization:
-- Extracts allele names from pipe-delimited headers (e.g. `M99641|IGHV1-18*01|...` → `IGHV1-18*01`)
-- Removes IMGT gap dots from sequences (e.g. `cagg.ttcag...tctgg` → `CAGGTTCAGTCTGG`)
-
-This replaces the need for `edit_imgt.pl` or manual preprocessing.
-
-## Architecture
-
-```
-src/
-├── IgDiscover.jl     # Module definition
-├── dna.jl            # DNA utilities (translate, edit_distance with thread-local buffers)
-├── config.jl         # TOML configuration with concrete types
-├── io.jl             # FASTA/TSV I/O, IMGT sanitization
-├── cdr3.jl           # CDR3 detection (ported from species.py)
-├── alignment.jl      # Multiple alignment, consensus (NucleotideCounter), affine alignment
-├── clustering.jl     # Hierarchical + single-linkage clustering
-├── group.jl          # PCR bias correction (UMI/barcode grouping)
-├── igblast.jl        # IgBLAST wrapper (calls external igblastn)
-├── augment.jl        # AIRR table augmentation with IgDiscover columns
-├── tablefilter.jl    # Preprocessing filter
-├── discovery.jl      # V gene candidate discovery (core algorithm)
-├── jdiscovery.jl     # J gene candidate discovery
-├── germlinefilter.jl # Germline/pre-germline filter (dispatch-based)
-├── rename.jl         # Gene renaming (canonical names from database)
-└── pipeline.jl       # Full pipeline orchestration
-```
-
-### Key Design Decisions
-
-**Germline filters use abstract dispatch:**
-```julia
-abstract type CandidateFilter end
-struct CrossMappingFilter <: CandidateFilter ... end
-struct ExactRatioFilter <: CandidateFilter ... end
-
-should_discard(f::CrossMappingFilter, ref, cand, same_gene) = ...
-should_discard(f::ExactRatioFilter, ref, cand, same_gene) = ...
-```
-
-**Thread-local edit distance buffers (zero allocation in hot loops):**
-```julia
-# Pre-allocated per-thread buffers avoid GC pressure during O(n²) pairwise comparisons
-edit_distance("ACGT", "AGGT"; maxdiff=1)  # 0 allocations after warmup
-```
-
-**Zero-allocation consensus counting:**
-```julia
-# NucleotideCounter replaces Dict{Char,Int} in the consensus inner loop
-# Fixed-size struct with fields for A, C, G, T, N, gap
-```
-
-**Precomputed hash indices in discovery:**
-```julia
-# O(1) exact-match lookups instead of O(n) linear scans
-v_no_cdr3_index = Dict{String,Vector{Int}}()  # sequence → row indices
-```
-
-## Testing
-
-### Unit Tests
-
-```julia
-using Pkg
-Pkg.test("IgDiscover")
-```
-
-### Docker Parity Test
-
-The project includes a Dockerfile that installs both Python igdiscover (via bioconda)
-and Julia IgDiscover.jl, runs both on the same data, and compares outputs.
+IgDiscover.jl produces results identical to the Python implementation, verified through Docker-based automated testing.
 
 ```bash
 # Build the parity test image
@@ -161,21 +98,54 @@ make test-reads READS=/path/to/reads.fasta.gz LIMIT=1000
 make test-interactive
 ```
 
-The Docker image uses `mambaorg/micromamba` and installs:
-- Python igdiscover 0.15.1 (bioconda: includes igblast 1.17, muscle 3.8, pear 0.9.6)
-- Julia 1.11.3 LTS with IgDiscover.jl precompiled
+The Docker image installs both Python igdiscover 0.15.1 (via bioconda, including igblast, muscle, pear) and Julia IgDiscover.jl, runs both on identical data, and compares `filtered.tsv.gz` and `new_V_germline.fasta` outputs.
 
-### Manual Parity Comparison
+## Building a System Image
+
+For near-instant startup (useful in production or interactive use):
 
 ```bash
-julia --project=. test/run_parity_test.jl /path/to/python/analysis /path/to/julia/analysis
+# Install PackageCompiler (one-time)
+julia -e 'using Pkg; Pkg.add("PackageCompiler")'
+
+# Build system image (~5 min)
+julia --project=. build/build_sysimage.jl
+
+# Use it
+julia --sysimage=build/IgDiscover.so --project=. bin/igdiscover.jl run
+
+# Or build a standalone application
+julia --project=. build/build_sysimage.jl --app
+```
+
+## Project Structure
+
+```
+src/
+├── IgDiscover.jl      # Module definition + PrecompileTools workload
+├── dna.jl             # DNA utilities: translate, edit_distance, hamming_distance
+├── config.jl          # TOML configuration types and loading
+├── io.jl              # FASTA/FASTQ I/O, IMGT sanitization, TSV I/O
+├── cdr3.jl            # CDR3 start/end detection from V/J reference
+├── alignment.jl       # MUSCLE wrapper, consensus, affine alignment
+├── clustering.jl      # Hierarchical + single-linkage clustering, UnionFind
+├── group.jl           # PCR bias correction (barcode grouping)
+├── igblast.jl         # IgBLAST wrapper (threaded chunked execution)
+├── augment.jl         # AIRR table augmentation (errors, coverage, CDR3)
+├── tablefilter.jl     # Preprocessing filter (→ filtered.tsv.gz)
+├── discovery.jl       # V gene candidate discovery
+├── jdiscovery.jl      # J gene discovery
+├── germlinefilter.jl  # Germline filter (abstract CandidateFilter + dispatch)
+├── rename.jl          # Gene renaming to canonical names
+├── clonotypes.jl      # Clonotype calling (V+J+CDR3 clustering)
+└── pipeline.jl        # Pipeline orchestration
 ```
 
 ## Roadmap
 
 - [x] Core germline discovery pipeline
-- [x] Preprocessing filter (filtered.tsv.gz)
-- [x] Germline filter (new_V_germline.fasta)
+- [x] Preprocessing filter (`filtered.tsv.gz`)
+- [x] Germline filter (`new_V_germline.fasta`)
 - [x] CDR3 detection from V/J reference
 - [x] TOML configuration
 - [x] Thread-local edit distance buffers
@@ -183,13 +153,19 @@ julia --project=. test/run_parity_test.jl /path/to/python/analysis /path/to/juli
 - [x] J gene discovery
 - [x] Gene renaming
 - [x] PCR bias correction (barcode grouping)
-- [x] IMGT database sanitization (replaces edit_imgt.pl)
+- [x] IMGT database sanitization
 - [x] Docker parity test infrastructure
 - [x] Synthetic test data generation
-- [ ] Clonotypes subcommand
+- [x] PrecompileTools startup workload
+- [x] Clonotype calling
+- [x] GitHub CI + codecov
+- [x] Documenter.jl documentation
+- [x] PackageCompiler build scripts
 - [ ] Clonoquery subcommand
-- [ ] Plot alleles
-- [ ] SnoopCompile + PackageCompiler binary bundle
+- [ ] Plot alleles (data export for plotting)
+- [ ] Allele ratio plots
+- [ ] Upstream/downstream analysis
+- [ ] PackageCompiler sysimage in CI artifacts
 
 ## Citation
 

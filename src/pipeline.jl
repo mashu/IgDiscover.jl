@@ -245,4 +245,17 @@ function run_final(config::Config, reads_path::String)
     end
 
     @info "Final output in $final_dir/"
+
+    # Clonotype calling on final filtered table
+    clonotypes_path = joinpath(final_dir, "clonotypes.tsv")
+    if isfile(filtered_path) && !isfile(clonotypes_path)
+        t = time()
+        table = read_assignments(filtered_path)
+        if nrow(table) > 0 && hasproperty(table, :cdr3) && hasproperty(table, :v_call) && hasproperty(table, :j_call)
+            ct_df, clusters = call_clonotypes(table)
+            write_table(clonotypes_path, ct_df)
+            @info @sprintf("Clonotypes: %d from %d rows in %.1fs",
+                nrow(ct_df), nrow(table), time() - t)
+        end
+    end
 end

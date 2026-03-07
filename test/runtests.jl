@@ -69,6 +69,17 @@ using DataFrames
         @test cfg.j_discovery.propagate
     end
 
+    @testset "Config merge dispatch" begin
+        # merge_value should merge Dicts recursively and replace scalars
+        d1 = Dict("a" => Dict("x" => 1, "y" => 2), "b" => 10)
+        d2 = Dict("a" => Dict("x" => 99), "b" => 20, "c" => 30)
+        merged = IgDiscover.merge_config(d1, d2)
+        @test merged["a"]["x"] == 99
+        @test merged["a"]["y"] == 2  # preserved from defaults
+        @test merged["b"] == 20
+        @test merged["c"] == 30
+    end
+
     @testset "FASTA I/O" begin
         tmpdir = mktempdir()
         path = joinpath(tmpdir, "test.fasta")
@@ -96,25 +107,21 @@ using DataFrames
     end
 
     @testset "IMGT sanitization" begin
-        # allele_name_from_header
         @test IgDiscover.allele_name_from_header("J00256|IGHJ1*01|Homo sapiens|F|") == "IGHJ1*01"
         @test IgDiscover.allele_name_from_header("M99641|IGHV1-18*01|Homo sapiens|F|V-REGION|") == "IGHV1-18*01"
         @test IgDiscover.allele_name_from_header("IGHV1-18*01") == "IGHV1-18*01"
         @test IgDiscover.allele_name_from_header("simple") == "simple"
 
-        # sanitize_imgt_sequence removes dots
         @test IgDiscover.sanitize_imgt_sequence("ATG...CCC.GGG") == "ATGCCCGGG"
         @test IgDiscover.sanitize_imgt_sequence("ATCG") == "ATCG"
         @test IgDiscover.sanitize_imgt_sequence("...") == ""
         @test IgDiscover.sanitize_imgt_sequence("atg..ccc") == "ATGCCC"
 
-        # sanitize_imgt_record
         rec = IgDiscover.FastaRecord("M99641|IGHV1-18*01|Homo sapiens|F|", "atg...ccc.ggg")
         cleaned = IgDiscover.sanitize_imgt_record(rec)
         @test cleaned.name == "IGHV1-18*01"
         @test cleaned.sequence == "ATGCCCGGG"
 
-        # Round-trip through write_sanitized_imgt
         tmpdir = mktempdir()
         imgt_path = joinpath(tmpdir, "imgt.fasta")
         out_path = joinpath(tmpdir, "clean.fasta")
@@ -139,11 +146,11 @@ using DataFrames
     end
 
     @testset "CDR3 detection" begin
-        v_seq = "AAA" ^ 30 * "TTTTATTGT" * "GCT"  # ...FYC then A (CDR3 start)
+        v_seq = "AAA" ^ 30 * "TTTTATTGT" * "GCT"
         pos = IgDiscover.cdr3_start_in_v(v_seq, "IGH")
         @test pos > 0
 
-        j_seq = "TGGGCAGGG"  # WA motif
+        j_seq = "TGGGCAGGG"
         pos_j = IgDiscover.cdr3_end_in_j(j_seq, "IGH")
         @test pos_j >= 0
     end
@@ -275,7 +282,7 @@ using DataFrames
     end
 
     @testset "Pseudo-CDR3" begin
-        seq = "ATCGATCGATCGATCGATCG"  # length 20
+        seq = "ATCGATCGATCGATCGATCG"
         p = IgDiscover.pseudo_cdr3(seq, 15, 5)
         @test !isempty(p)
         @test length(p) == 10
@@ -352,6 +359,78 @@ using DataFrames
         ])
         @test_throws ErrorException IgDiscover.validate_fasta(dup_path)
 
+        rm(tmpdir; recursive=true)
+    end
+
+    @testset "Clonotypes" begin
+        df = DataFrame(
+            v_call = ["IGHV1*01", "IGHV1*01", "IGHV1*01", "IGHV2*01", "IGHV2*01"],
+            j_call = ["IGHJ1*01", "IGHJ1*01", "IGHJ1*01", "IGHJ2*01", "IGHJ2*01"],
+            cdr3   = ["AATGT",    "AATGT",    "CCCCC",    "GGGGG",    "GGGGA"],
+            V_SHM  = [1.0,        2.0,        0.5,        1.0,        0.5],
+        )
+
+        ct_df, clusters = IgDiscover.call_clonotypes(df)
+
+        # Same V + J + identical CDR3 → same clonotype
+        # AATGT x2 should cluster together
+        # CCCCC is different CDR3 → separate clonotype
+        # GGGGG and GGGGA differ by 1 → same clonotype (Hamming ≤ 1)
+        @test nrow(ct_df) == 3
+        @test length(clusters) == 3
+        @test hasproperty(ct_df, :clonotype_id)
+        @test hasproperty(ct_df, :clonotype_size)
+
+        # Check sizes
+        sizes = sort(ct_df.clonotype_size; rev=true)
+        @test sizes[1] == 2  # AATGT cluster or GGGGG cluster
+
+        # With custom mismatches=0, GGGGG and GGGGA should be separate
+        caller_strict = IgDiscover.ClonotypeCaller(max_mismatches=0)
+        ct_strict, cl_strict = IgDiscover.call_clonotypes(df; caller=caller_strict)
+        @test nrow(ct_strict) == 4  # GGGGG and GGGGA now separate
+
+        # Sort by size
+        caller_sorted = IgDiscover.ClonotypeCaller(sort_by_size=true)
+        ct_sorted, _ = IgDiscover.call_clonotypes(df; caller=caller_sorted)
+        @test ct_sorted.clonotype_size[1] >= ct_sorted.clonotype_size[end]
+    end
+
+    @testset "Clonotypes edge cases" begin
+        # Empty CDR3s should be skipped
+        df_empty = DataFrame(
+            v_call = ["IGHV1*01", "IGHV1*01"],
+            j_call = ["IGHJ1*01", ""],
+            cdr3   = ["AATGT",    ""],
+            V_SHM  = [1.0,        0.0],
+        )
+        ct, _ = IgDiscover.call_clonotypes(df_empty)
+        @test nrow(ct) == 1  # only one valid row
+
+        # Missing V_SHM column should work
+        df_no_shm = DataFrame(
+            v_call = ["IGHV1*01", "IGHV1*01"],
+            j_call = ["IGHJ1*01", "IGHJ1*01"],
+            cdr3   = ["AATGT",    "AATGT"],
+        )
+        ct2, _ = IgDiscover.call_clonotypes(df_no_shm)
+        @test nrow(ct2) == 1
+    end
+
+    @testset "Clonotype members output" begin
+        tmpdir = mktempdir()
+        df = DataFrame(
+            v_call = ["IGHV1*01", "IGHV1*01"],
+            j_call = ["IGHJ1*01", "IGHJ1*01"],
+            cdr3   = ["AATGT",    "AATGT"],
+            V_SHM  = [1.0,        2.0],
+        )
+        ct, clusters = IgDiscover.call_clonotypes(df)
+        members_path = joinpath(tmpdir, "members.tsv")
+        IgDiscover.write_members(members_path, df, clusters)
+        @test isfile(members_path)
+        lines = readlines(members_path)
+        @test length(lines) >= 3  # header + 2 member rows
         rm(tmpdir; recursive=true)
     end
 
