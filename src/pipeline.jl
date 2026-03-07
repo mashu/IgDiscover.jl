@@ -96,7 +96,7 @@ function run_iteration(config::Config, iter_dir::String, reads_path::String, ite
     airr_path     = joinpath(iter_dir, "airr.tsv.gz")
     assigned_path = joinpath(iter_dir, "assigned.tsv.gz")
     filtered_path = joinpath(iter_dir, "filtered.tsv.gz")
-    candidates_path = joinpath(iter_dir, "candidates.tab")
+    candidates_path = joinpath(iter_dir, "candidates.tsv")
 
     # IgBLAST
     if !isfile(airr_path)
@@ -164,7 +164,7 @@ function run_iteration(config::Config, iter_dir::String, reads_path::String, ite
 end
 
 function run_germline_filters(config::Config, iter_dir::String)
-    candidates_path = joinpath(iter_dir, "candidates.tab")
+    candidates_path = joinpath(iter_dir, "candidates.tsv")
     wl_paths = String[]
     config.germline_filter.whitelist && push!(wl_paths, "database/V.fasta")
     isfile("whitelist.fasta") && push!(wl_paths, "whitelist.fasta")
@@ -177,14 +177,14 @@ function run_germline_filters(config::Config, iter_dir::String)
         candidates = CSV.read(candidates_path, DataFrame; delim='\t')
         if nrow(candidates) == 0 || !hasproperty(candidates, :consensus)
             @info "No candidates; writing empty germline outputs"
-            write_table(joinpath(iter_dir, "new_V_$(prefix)germline.tab"), candidates)
-            write_table(joinpath(iter_dir, "annotated_V_$(prefix)germline.tab"), candidates)
+            write_table(joinpath(iter_dir, "new_V_$(prefix)germline.tsv"), candidates)
+            write_table(joinpath(iter_dir, "annotated_V_$(prefix)germline.tsv"), candidates)
             write_fasta(fasta_path, FastaRecord[])
         else
             filtered, annotated = germline_filter!(candidates, criteria; whitelist=wl)
             filtered = deduplicate_by_consensus(filtered)  # one row per unique sequence (match Python)
-            write_table(joinpath(iter_dir, "new_V_$(prefix)germline.tab"), filtered)
-            write_table(joinpath(iter_dir, "annotated_V_$(prefix)germline.tab"), annotated)
+            write_table(joinpath(iter_dir, "new_V_$(prefix)germline.tsv"), filtered)
+            write_table(joinpath(iter_dir, "annotated_V_$(prefix)germline.tsv"), annotated)
             germline_filter_to_fasta(filtered, fasta_path)
         end
     end

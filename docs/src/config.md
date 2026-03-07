@@ -25,10 +25,11 @@ cluster_size = 50
 ## API
 
 ```@docs
-Config
 load_config
 write_default_config
 PreprocessingFilter
 GermlineFilterCriteria
 JDiscoveryConfig
 ```
+
+See also [`Config`](@ref) in the API Reference.

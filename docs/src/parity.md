@@ -15,7 +15,7 @@ make test-reads READS=/path/to/reads.fasta.gz  # Real data
 
 - `filtered.tsv.gz` — Column-level comparison of preprocessed assignments
 - `new_V_germline.fasta` — Discovered V gene sequences
-- `candidates.tab` — Discovery statistics
+- `candidates.tsv` — Discovery statistics
 
 ## CI Integration
 

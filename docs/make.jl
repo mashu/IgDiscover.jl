@@ -14,9 +14,13 @@ makedocs(;
     ),
     pages=[
         "Home" => "index.md",
+        "Algorithm" => "algorithm.md",
         "Configuration" => "config.md",
         "Pipeline" => "pipeline.md",
         "Modules" => [
+            "IgBLAST" => "modules/igblast.md",
+            "Read grouping" => "modules/group.md",
+            "Augment" => "modules/augment.md",
             "DNA Utilities" => "modules/dna.md",
             "FASTA I/O" => "modules/io.md",
             "CDR3 Detection" => "modules/cdr3.md",

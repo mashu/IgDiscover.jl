@@ -1,5 +1,10 @@
 # I/O utilities for FASTA files and assignment tables
 
+"""
+    FastaRecord
+
+A single FASTA record with `name` (header/identifier) and `sequence` (nucleotide or amino acid string).
+"""
 struct FastaRecord
     name::String
     sequence::String

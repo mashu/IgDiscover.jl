@@ -7,6 +7,12 @@
 #
 # Uses single-linkage clustering within each (V, J) group.
 
+"""
+    ClonotypeCaller(max_mismatches=1, v_shm_threshold=5.0, sort_by_size=false)
+
+Parameters for clonotype assignment: max CDR3 nucleotide mismatches, V SHM %% threshold,
+and whether to sort clonotypes by size. Use with [`call_clonotypes`](@ref).
+"""
 struct ClonotypeCaller
     max_mismatches::Int
     v_shm_threshold::Float64

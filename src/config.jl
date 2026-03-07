@@ -1,5 +1,10 @@
 # Configuration types and loading
 
+"""
+    PreprocessingFilter
+
+Filter thresholds for assignment tables: `v_coverage`, `j_coverage` (%%), and `v_evalue` (V gene E-value).
+"""
 struct PreprocessingFilter
     v_coverage::Float64
     j_coverage::Float64
@@ -12,6 +17,12 @@ PreprocessingFilter(d::Dict) = PreprocessingFilter(
     Float64(d["v_evalue"]),
 )
 
+"""
+    GermlineFilterCriteria
+
+Criteria for germline candidate filtering: unique CDR3s/Js, cluster size, ratios, etc.
+Used for both pre-germline and germline filter stages.
+"""
 struct GermlineFilterCriteria
     unique_cdr3s::Int
     unique_js::Int
@@ -40,6 +51,11 @@ GermlineFilterCriteria(d::Dict) = GermlineFilterCriteria(
     Int(d["unique_d_threshold"]),
 )
 
+"""
+    JDiscoveryConfig
+
+J gene discovery settings: `allele_ratio`, `cross_mapping_ratio`, and `propagate` (to later iterations).
+"""
 struct JDiscoveryConfig
     allele_ratio::Float64
     cross_mapping_ratio::Float64

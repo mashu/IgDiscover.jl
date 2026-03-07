@@ -71,8 +71,10 @@ end
 function compare_germline(py_dir::String, jl_dir::String)
     println("\n══════ Comparing new_V_germline ══════")
 
-    py_tab = find_file(py_dir, "new_V_germline.tab")
-    jl_tab = find_file(jl_dir, "new_V_germline.tab")
+    # We only create .tsv; Python igdiscover may still output .tab — accept both when comparing
+    py_tab = find_file(py_dir, "new_V_germline.tsv")
+    py_tab === nothing && (py_tab = find_file(py_dir, "new_V_germline.tab"))
+    jl_tab = find_file(jl_dir, "new_V_germline.tsv")
     py_fa = find_file(py_dir, "new_V_germline.fasta")
     jl_fa = find_file(jl_dir, "new_V_germline.fasta")
 
@@ -105,8 +107,8 @@ function compare_germline(py_dir::String, jl_dir::String)
             end
         end
     else
-        py_tab === nothing && println("  ✗ Python new_V_germline.tab not found")
-        jl_tab === nothing && println("  ✗ Julia new_V_germline.tab not found")
+        py_tab === nothing && println("  ✗ Python new_V_germline table not found")
+        jl_tab === nothing && println("  ✗ Julia new_V_germline.tsv not found")
         passed = false
     end
 

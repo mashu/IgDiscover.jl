@@ -20,6 +20,14 @@ init_analysis("my_analysis", "path/to/database", "reads.fasta.gz")
 run_pipeline("my_analysis")
 ```
 
+## Documentation
+
+- **[How the algorithm works](@ref)** — Step-by-step: preprocessing, IgBLAST, augment, filter, discovery, germline filter, iteration, final run.
+- **Pipeline** — File layout and iteration flow.
+- **[Configuration](@ref)** — TOML options and defaults.
+- **Modules** — API by component (IgBLAST, grouping, augment, DNA, I/O, CDR3, alignment, clustering, discovery, germline filter, clonotypes).
+- **[API Reference](@ref)** — Exported functions and types.
+
 ## Features
 
 - **Germline V gene discovery** — iterative consensus-based discovery with clustering

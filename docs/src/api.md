@@ -3,12 +3,11 @@
 ## Core Types
 
 ```@docs
-FastaRecord
 Config
 FilterStats
-Candidate
-ClonotypeCaller
 ```
+
+[`FastaRecord`](@ref) and [`ClonotypeCaller`](@ref) are documented in the **FASTA I/O** and **Clonotypes** module pages.
 
 ## I/O
 
@@ -41,39 +40,4 @@ rename_genes
 call_clonotypes
 ```
 
-## DNA Utilities
-
-```@docs
-edit_distance
-hamming_distance
-translate
-reverse_complement
-has_stop
-sequence_hash
-```
-
-## Alignment
-
-```@docs
-multialign
-consensus_sequence
-iterative_consensus
-align_affine
-describe_nt_change
-```
-
-## CDR3
-
-```@docs
-cdr3_start_in_v
-cdr3_end_in_j
-find_cdr3
-```
-
-## Clustering
-
-```@docs
-cluster_sequences
-single_linkage
-count_clonotypes
-```
+For DNA utilities, alignment, CDR3 detection, and clustering see the module pages: **DNA Utilities**, **Alignment**, **CDR3 Detection**, **Clustering**.

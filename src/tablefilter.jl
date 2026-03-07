@@ -1,5 +1,11 @@
 # Preprocessing filter for assignment tables (produces filtered.tsv.gz)
 
+"""
+    FilterStats
+
+Counts from preprocessing filter: `total`, `has_vj_assignment`, `has_no_stop`, `good_v_evalue`,
+`good_v_coverage`, `good_j_coverage`, `has_cdr3`. Supports `+` for summing stats.
+"""
 struct FilterStats
     total::Int
     has_vj_assignment::Int
