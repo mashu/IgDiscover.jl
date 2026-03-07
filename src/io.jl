@@ -26,7 +26,9 @@ If `limit > 0`, stop after that many records.
 function read_fasta(path::AbstractString; limit::Int=0)
     records = FastaRecord[]
     raw = endswith(path, ".gz") ? GzipDecompressorStream(open(path)) : open(path)
-    first_byte = read(raw, UInt8)
+    first_chunk = read(raw, 1)
+    isempty(first_chunk) && (close(raw); return records)
+    first_byte = only(first_chunk)
     stream = PrependIO(first_byte, raw)
     if first_byte == UInt8('>')
         reader = FASTA.Reader(stream)
@@ -59,6 +61,27 @@ Read FASTA into name → sequence dictionary.
 """
 function read_fasta_dict(path::AbstractString)
     Dict(r.name => r.sequence for r in read_fasta(path))
+end
+
+"""
+    allele_name_from_header(name)
+
+Extract allele identifier from IMGT-style header (e.g. "J00256|IGHJ1*01|..." → "IGHJ1*01").
+Falls back to full name if no pipe.
+"""
+allele_name_from_header(name::AbstractString) =
+    (p = split(name, '|'); length(p) >= 2 ? p[2] : name)
+
+"""
+    write_fasta_allele_headers(path_in, path_out)
+
+Read FASTA from path_in and write to path_out with headers replaced by allele names
+(e.g. IGHV1-18*01, IGHD3-3*01, IGHJ1*01) so IgBLAST and downstream see clean identifiers.
+"""
+function write_fasta_allele_headers(path_in::AbstractString, path_out::AbstractString)
+    records = read_fasta(path_in)
+    cleaned = [FastaRecord(allele_name_from_header(r.name), r.sequence) for r in records]
+    write_fasta(path_out, cleaned)
 end
 
 """

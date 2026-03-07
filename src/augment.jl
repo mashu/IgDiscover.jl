@@ -9,7 +9,7 @@ col_int(df::DataFrame, col::Symbol, i::Int) =
     hasproperty(df, col) ? coalesce(Int(df[i, col]), 0) : 0
 
 col_float(df::DataFrame, col::Symbol, i::Int, default::Float64=0.0) =
-    hasproperty(df, col) ? coalesce(Float64(df[i, col]), default) : default
+    hasproperty(df, col) ? Float64(coalesce(df[i, col], default)) : default
 
 """
     parse_header(header) -> (name, count, barcode)
@@ -74,19 +74,30 @@ function query_position(
     -1
 end
 
-# Build a short_id → full_name mapping for IMGT-style headers
+# Build short_id → full_name mapping for IMGT-style headers (e.g. M99641|IGHV1-18*01|...).
+# Registers: "part1_part2", "part2" (gene+allele), and gene-only so IgBLAST call styles all resolve.
 function build_short_id_map(db::Dict{String,String})
     out = Dict{String,String}()
     for name in keys(db)
         parts = split(name, '|')
+        get!(out, name, name)
         if length(parts) >= 2
             short = join(parts[1:2], "_")
             get!(out, short, name)
+            gene_allele = parts[2]  # e.g. IGHV1-18*01, IGHJ1*01
+            get!(out, gene_allele, name)
+            if occursin('*', gene_allele)
+                gene_only = first(split(gene_allele, '*'))
+                get!(out, gene_only, name)  # e.g. IGHV1-18, IGHJ1
+            end
         end
-        get!(out, name, name)
     end
     out
 end
+
+# From full IMGT header return short gene identifier (second pipe field: IGHV/IGHD/IGHJ style).
+full_to_short(full_name::AbstractString) =
+    (p = split(full_name, '|'); length(p) >= 2 ? p[2] : full_name)
 
 """
     augment_table(airr_df, database_dir; sequence_type) -> DataFrame
@@ -238,6 +249,13 @@ function augment_table(
 
     # d_support: D-gene e-value
     hasproperty(result, :d_support) || (result.d_support = fill(Inf, n))
+
+    # Normalize v_call, j_call, d_call to short identifiers (e.g. IGHV1-18*01, IGHD1-1*01, IGHJ1*01)
+    for col in (:v_call, :d_call, :j_call)
+        hasproperty(result, col) || continue
+        resolve = col === :v_call ? resolve_v : (col === :d_call ? resolve_d : resolve_j)
+        result[!, col] = [full_to_short(resolve(coalesce(result[i, col], ""))) for i in 1:n]
+    end
 
     # Normalize stop_codon to "T"/"F"
     if !hasproperty(result, :stop_codon)

@@ -65,12 +65,18 @@ function run_iteration(config::Config, iter_dir::String, reads_path::String, ite
     mkpath(joinpath(iter_dir, "database"))
     mkpath(joinpath(iter_dir, "stats"))
 
-    # Set up per-iteration database
+    # Set up per-iteration database (iteration 1: clean headers to allele names for IgBLAST)
+    db_dst = joinpath(iter_dir, "database")
     v_src = iteration == 1 ?
         joinpath("database", "V.fasta") :
         joinpath(@sprintf("iteration-%02d", iteration - 1), "new_V_pregermline.fasta")
-    cp(v_src, joinpath(iter_dir, "database", "V.fasta"); force=true)
-    cp(joinpath("database", "D.fasta"), joinpath(iter_dir, "database", "D.fasta"); force=true)
+    if iteration == 1
+        write_fasta_allele_headers(v_src, joinpath(db_dst, "V.fasta"))
+        write_fasta_allele_headers(joinpath("database", "D.fasta"), joinpath(db_dst, "D.fasta"))
+    else
+        cp(v_src, joinpath(db_dst, "V.fasta"); force=true)
+        cp(joinpath("database", "D.fasta"), joinpath(db_dst, "D.fasta"); force=true)
+    end
 
     j_src = if iteration > 1 && config.j_discovery.propagate &&
                isfile("iteration-01/new_J.fasta")
@@ -78,7 +84,11 @@ function run_iteration(config::Config, iter_dir::String, reads_path::String, ite
     else
         joinpath("database", "J.fasta")
     end
-    cp(j_src, joinpath(iter_dir, "database", "J.fasta"); force=true)
+    if iteration == 1
+        write_fasta_allele_headers(j_src, joinpath(db_dst, "J.fasta"))
+    else
+        cp(j_src, joinpath(db_dst, "J.fasta"); force=true)
+    end
 
     db_dir        = joinpath(iter_dir, "database")
     airr_path     = joinpath(iter_dir, "airr.tsv.gz")
