@@ -10,6 +10,20 @@ struct FastaRecord
     sequence::String
 end
 
+# Format dispatch: no if/else on first byte in the read path
+abstract type SequenceFormat end
+struct FastaFormat <: SequenceFormat end
+struct FastqFormat <: SequenceFormat end
+
+const FORMAT_BY_BYTE = Dict{UInt8, SequenceFormat}(
+    UInt8('>') => FastaFormat(),
+    UInt8('@') => FastqFormat(),
+)
+
+format_from_byte(b::UInt8) = get(FORMAT_BY_BYTE, b) do
+    error("Not FASTA (>) or FASTQ (@): first byte '$(Char(b))' (0x$(string(b, base=16)))")
+end
+
 # Type-stable IO wrapper: prepends one byte so we can peek format and still pass stream to reader
 mutable struct PeekableIO <: IO
     byte::UInt8
@@ -34,34 +48,41 @@ Base.bytesavailable(io::PeekableIO) = (!io.consumed ? 1 : 0) + bytesavailable(io
 
 Read records from a FASTA or FASTQ file (plain or gzipped). Format is auto-detected
 by the first character ('>' = FASTA, '@' = FASTQ). Sequences are uppercased.
-If `limit > 0`, stop after that many records.
+If `limit > 0`, stop after that many records. Dispatch is via SequenceFormat.
 """
 function read_fasta(path::AbstractString; limit::Int=0)
-    records = FastaRecord[]
     raw = endswith(path, ".gz") ? GzipDecompressorStream(open(path)) : open(path)
     first_chunk = read(raw, 1)
-    isempty(first_chunk) && (close(raw); return records)
+    isempty(first_chunk) && (close(raw); return FastaRecord[])
     first_byte = only(first_chunk)
     stream = PeekableIO(first_byte, false, raw)
-    if first_byte == UInt8('>')
-        reader = FASTA.Reader(stream)
-        for record in reader
-            name = FASTA.identifier(record)
-            seq = uppercase(String(FASTA.sequence(record)))
-            push!(records, FastaRecord(name, seq))
-            limit > 0 && length(records) >= limit && break
-        end
-    elseif first_byte == UInt8('@')
-        reader = FASTQ.Reader(stream)
-        for record in reader
-            name = first(split(FASTQ.identifier(record), r"\s+"))
-            seq = uppercase(String(FASTQ.sequence(record)))
-            push!(records, FastaRecord(name, seq))
-            limit > 0 && length(records) >= limit && break
-        end
-    else
-        close(stream)
-        error("Not FASTA (>) or FASTQ (@): first byte '$(Char(first_byte))' (0x$(string(first_byte, base=16))) in $path")
+    format = format_from_byte(first_byte)
+    result = read_fasta(stream, format, limit)
+    close(stream)
+    result
+end
+
+function read_fasta(stream::PeekableIO, ::FastaFormat, limit::Int)
+    records = FastaRecord[]
+    reader = FASTA.Reader(stream)
+    for record in reader
+        name = FASTA.identifier(record)
+        seq = uppercase(String(FASTA.sequence(record)))
+        push!(records, FastaRecord(name, seq))
+        limit > 0 && length(records) >= limit && break
+    end
+    close(reader)
+    records
+end
+
+function read_fasta(stream::PeekableIO, ::FastqFormat, limit::Int)
+    records = FastaRecord[]
+    reader = FASTQ.Reader(stream)
+    for record in reader
+        name = first(split(FASTQ.identifier(record), r"\s+"))
+        seq = uppercase(String(FASTQ.sequence(record)))
+        push!(records, FastaRecord(name, seq))
+        limit > 0 && length(records) >= limit && break
     end
     close(reader)
     records
