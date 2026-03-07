@@ -26,6 +26,7 @@ cluster_size = 50
 
 ```@docs
 load_config
+IgDiscover.parse_config
 write_default_config
 PreprocessingFilter
 GermlineFilterCriteria

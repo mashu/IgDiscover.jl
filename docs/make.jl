@@ -31,6 +31,7 @@ makedocs(;
             "J Discovery" => "modules/jdiscovery.md",
             "Germline Filter" => "modules/germlinefilter.md",
             "Clonotypes" => "modules/clonotypes.md",
+            "Utilities" => "modules/utils.md",
         ],
         "Parity Testing" => "parity.md",
         "API Reference" => "api.md",

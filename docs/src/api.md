@@ -27,6 +27,7 @@ write_sanitized_imgt
 ## Pipeline
 
 ```@docs
+IgDiscover.cached
 init_analysis
 run_pipeline
 augment_table
