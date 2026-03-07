@@ -170,7 +170,7 @@ function step_germline_filters(config::Config, iter_dir::String)
         fasta_path = joinpath(iter_dir, "new_V_$(prefix)germline.fasta")
         isfile(fasta_path) && continue
 
-        candidates = CSV.read(candidates_path, DataFrame; delim='\t')
+        candidates = read_assignments(candidates_path)
         if nrow(candidates) == 0 || !hasproperty(candidates, :consensus)
             @info "No candidates; writing empty germline outputs"
             write_table(joinpath(iter_dir, "new_V_$(prefix)germline.tsv"), candidates)
@@ -189,7 +189,7 @@ end
 function step_rename(config::Config, iter_dir::String)
     config.rename || return
     germline_fasta = joinpath(iter_dir, "new_V_germline.fasta")
-    isfile(germline_fasta) && !isempty(read_fasta(germline_fasta)) || return
+    has_fasta_records(germline_fasta) || return
     renamed_path = joinpath(iter_dir, "new_V_germline_renamed.fasta")
     rename_genes(germline_fasta, joinpath("database", "V.fasta"), renamed_path)
     cp(renamed_path, germline_fasta; force=true)
@@ -201,7 +201,7 @@ function step_j_discovery(config::Config, db_dir::String, filtered_path::String,
         table      = read_assignments(filtered_path)
         j_database = read_fasta_dict(joinpath(db_dir, "J.fasta"))
         discover_j_to_fasta(table, j_database, config, j_out)
-        if isempty(read_fasta(j_out))
+        if !has_fasta_records(j_out)
             @info "J discovery produced no candidates; keeping original J database"
             cp(joinpath(db_dir, "J.fasta"), j_out; force=true)
         end
@@ -256,7 +256,7 @@ function run_final(config::Config, reads_path::String)
 
     # Resolve final V database
     germline_fasta = joinpath(last_iter, "new_V_germline.fasta")
-    v_src = if isfile(germline_fasta) && !isempty(read_fasta(germline_fasta))
+    v_src = if has_fasta_records(germline_fasta)
         germline_fasta
     else
         @info "No new V germline sequences discovered; using original database"

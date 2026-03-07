@@ -54,17 +54,9 @@ end
 """
     parse_fasta_string(output) -> Dict{String,String}
 
-Parse a FASTA-format string into name → sequence dictionary. Uses FASTX.FASTA.Reader.
+Parse a FASTA-format string into name → sequence dictionary. Delegates to read_fasta_dict_from_io.
 """
-function parse_fasta_string(output::String)
-    aligned = Dict{String,String}()
-    reader = FASTA.Reader(IOBuffer(output))
-    for record in reader
-        aligned[FASTA.identifier(record)] = uppercase(String(FASTA.sequence(record)))
-    end
-    close(reader)
-    aligned
-end
+parse_fasta_string(output::String) = read_fasta_dict_from_io(IOBuffer(output))
 
 """
     multialign(sequences::Dict{String,String}; program="muscle-fast", threads=Sys.CPU_THREADS) -> Dict{String,String}

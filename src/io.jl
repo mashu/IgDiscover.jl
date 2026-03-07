@@ -97,6 +97,32 @@ function read_fasta_dict(path::AbstractString)
     Dict(r.name => r.sequence for r in read_fasta(path))
 end
 
+"""
+    read_fasta_dict_from_io(io::IO; limit=0) -> Dict{String,String}
+
+Read FASTA from an open stream into name → sequence dictionary. Sequences are uppercased.
+Used by parse_fasta_string (alignment) and keeps FASTA→Dict logic in one place.
+"""
+function read_fasta_dict_from_io(io::IO; limit::Int=0)
+    out = Dict{String,String}()
+    reader = FASTA.Reader(io)
+    for record in reader
+        out[FASTA.identifier(record)] = uppercase(String(FASTA.sequence(record)))
+        limit > 0 && length(out) >= limit && break
+    end
+    close(reader)
+    out
+end
+
+"""
+    has_fasta_records(path) -> Bool
+
+True if path exists, is a FASTA/FASTQ file, and contains at least one record.
+"""
+function has_fasta_records(path::AbstractString)
+    isfile(path) && !isempty(read_fasta(path))
+end
+
 # ─── IMGT database sanitization ───
 
 """
