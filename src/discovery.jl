@@ -123,10 +123,33 @@ function sibling_consensus(gene::String, group::DataFrame, params::DiscoveryPara
     cons
 end
 
+# ─── N-tolerant merge: rule dispatched ───
+
+abstract type MergeRule end
+struct TakeFirst <: MergeRule end
+struct TakeSecond <: MergeRule end
+struct TakeBoth <: MergeRule end
+struct MergeConflict <: MergeRule end
+
+function merge_rule(c1::Char, c2::Char)
+    c1 == '-' && return TakeSecond()
+    c2 == '-' && return TakeFirst()
+    c1 == 'N' && return TakeSecond()
+    c2 == 'N' && return TakeFirst()
+    c1 == c2 && return TakeBoth()
+    return MergeConflict()
+end
+
+get_merged_char(::TakeFirst, c1::Char, c2::Char) = c1
+get_merged_char(::TakeSecond, c1::Char, c2::Char) = c2
+get_merged_char(::TakeBoth, c1::Char, c2::Char) = c1
+get_merged_char(::MergeConflict, c1::Char, c2::Char) = nothing
+
 """
     merge_n_tolerant(s, t) -> Union{String, Nothing}
 
 Merge two sequences where 'N' is treated as a wildcard. Returns nothing on conflict.
+Column merge rule is dispatched via MergeRule (TakeFirst, TakeSecond, TakeBoth, MergeConflict).
 """
 function merge_n_tolerant(s::String, t::String)
     len = max(length(s), length(t))
@@ -134,14 +157,10 @@ function merge_n_tolerant(s::String, t::String)
     for i in 1:len
         c1 = i <= length(s) ? s[i] : '-'
         c2 = i <= length(t) ? t[i] : '-'
-        result = if c1 == '-'; c2
-        elseif c2 == '-'; c1
-        elseif c1 == 'N'; c2
-        elseif c2 == 'N'; c1
-        elseif c1 == c2; c1
-        else return nothing
-        end
-        push!(buf, result)
+        rule = merge_rule(c1, c2)
+        r = get_merged_char(rule, c1, c2)
+        r === nothing && return nothing
+        push!(buf, r)
     end
     String(buf)
 end

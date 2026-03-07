@@ -254,6 +254,7 @@ using DataFrames
         @test IgDiscover.merge_n_tolerant("ANCG", "ATCG") == "ATCG"
         @test IgDiscover.merge_n_tolerant("ATCG", "GGGC") === nothing
         @test IgDiscover.merge_n_tolerant("ATC",  "ATCG") == "ATCG"
+        @test IgDiscover.merge_n_tolerant("ATCG", "ATC")  == "ATCG"
     end
 
     @testset "Reservoir sampling" begin
