@@ -21,17 +21,26 @@ end
 struct MuscleAligner <: Aligner
     variant::String  # "muscle", "muscle-fast", "muscle-medium"
 end
-function run_align(a::MuscleAligner, fasta_str::String, ::Int)
+# MUSCLE5 -refineiters: fewer = faster, less accurate. -threads uses internal parallelism.
+function _muscle_refineiters(variant::String)
+    variant == "muscle-fast" && return 1
+    variant == "muscle-medium" && return 10
+    return 100  # "muscle" or default
+end
+function run_align(a::MuscleAligner, fasta_str::String, threads::Int)
     tmpin = tempname() * ".fa"
     tmpout = tempname() * ".afa"
     write(tmpin, fasta_str)
-    p = run(pipeline(`muscle -align $tmpin -output $tmpout`, stderr=devnull); wait=false)
+    ref = _muscle_refineiters(a.variant)
+    # MUSCLE5: -align, -refineiters N, -threads N
+    cmd = `muscle -align $tmpin -output $tmpout -refineiters $ref -threads $threads`
+    p = run(pipeline(cmd, stderr=devnull); wait=false)
     wait(p)
     result = if p.exitcode == 0 && isfile(tmpout) && filesize(tmpout) > 0
         read(tmpout, String)
     else
         rm(tmpout; force=true)
-        run(pipeline(`muscle -quiet -in $tmpin -out $tmpout`, stderr=devnull))
+        run(pipeline(`muscle -quiet -in $tmpin -out $tmpout -threads $threads`, stderr=devnull))
         read(tmpout, String)
     end
     rm(tmpin; force=true)

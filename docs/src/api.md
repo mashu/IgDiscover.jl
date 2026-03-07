@@ -1,5 +1,11 @@
 # API Reference
 
+## Standalone app
+
+```@docs
+IgDiscover.julia_main
+```
+
 ## Core Types
 
 ```@docs

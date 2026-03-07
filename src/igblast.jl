@@ -47,19 +47,21 @@ end
 # ─── Two dispatch variants for penalty ───
 
 """
-    run_igblast_chunk(sequences, blastdb_dir; species, sequence_type) -> String
+    run_igblast_chunk(sequences, blastdb_dir; species, sequence_type, threads) -> String
 
 Run igblastn on sequences (no mismatch penalty override).
+Uses IgBLAST's internal threading (`-num_threads`) for parallelism.
 """
 function run_igblast_chunk(sequences::Vector{FastaRecord},
                           blastdb_dir::AbstractString;
                           species::String = "",
-                          sequence_type::String = "Ig")
-    run_igblast_impl(sequences, blastdb_dir, species, sequence_type, String[])
+                          sequence_type::String = "Ig",
+                          threads::Int = 1)
+    run_igblast_impl(sequences, blastdb_dir, species, sequence_type, threads, String[])
 end
 
 """
-    run_igblast_chunk(sequences, blastdb_dir, penalty; species, sequence_type) -> String
+    run_igblast_chunk(sequences, blastdb_dir, penalty; species, sequence_type, threads) -> String
 
 Run igblastn on sequences with a mismatch penalty.
 """
@@ -67,13 +69,14 @@ function run_igblast_chunk(sequences::Vector{FastaRecord},
                           blastdb_dir::AbstractString,
                           penalty::Int;
                           species::String = "",
-                          sequence_type::String = "Ig")
-    run_igblast_impl(sequences, blastdb_dir, species, sequence_type, ["-penalty", string(penalty)])
+                          sequence_type::String = "Ig",
+                          threads::Int = 1)
+    run_igblast_impl(sequences, blastdb_dir, species, sequence_type, threads, ["-penalty", string(penalty)])
 end
 
 function run_igblast_impl(sequences::Vector{FastaRecord},
                          blastdb_dir::String, species::String,
-                         sequence_type::String, extra_args::Vector{String})
+                         sequence_type::String, threads::Int, extra_args::Vector{String})
     sequence_type in ("Ig", "TCR") || error("sequence_type must be \"Ig\" or \"TCR\"")
 
     args = String[]
@@ -88,7 +91,7 @@ function run_igblast_impl(sequences::Vector{FastaRecord},
 
     !isempty(species) && append!(args, ["-organism", species])
     append!(args, ["-ig_seqtype", sequence_type,
-                   "-num_threads", "1",
+                   "-num_threads", string(threads),
                    "-domain_system", "imgt",
                    "-num_alignments_V", "1",
                    "-num_alignments_D", "1",
@@ -114,6 +117,8 @@ end
                         sequence_type, species, penalty, threads, limit, chunksize)
 
 Run IgBLAST on a FASTA file, write AIRR TSV (gzipped) output.
+Parallelism is via IgBLAST's internal threading (`-num_threads`). Chunks are run
+**sequentially** (one process at a time); chunking only limits memory per process.
 """
 function run_igblast_on_fasta(database_dir::AbstractString,
                              input_fasta::AbstractString,
@@ -123,7 +128,7 @@ function run_igblast_on_fasta(database_dir::AbstractString,
                              penalty::Int = 0,
                              threads::Int = Sys.CPU_THREADS,
                              limit::Int = 0,
-                             chunksize::Int = 1000)
+                             chunksize::Int = 50_000)
     sequences = read_fasta(input_fasta; limit = limit)
     limit_str = limit > 0 ? " (limit=$limit)" : ""
     @info "Running IgBLAST on $(length(sequences)) sequences with $threads threads$limit_str"
@@ -131,18 +136,18 @@ function run_igblast_on_fasta(database_dir::AbstractString,
     blastdb_dir = mktempdir()
     make_vdj_blastdb(blastdb_dir, database_dir)
 
+    # One process per chunk, sequential; each igblastn uses -num_threads. Chunking = memory only.
     chunks = [sequences[i:min(i + chunksize - 1, end)]
               for i in 1:chunksize:length(sequences)]
-
+    @info "Processing $(length(chunks)) chunk(s) (chunksize=$chunksize)"
     results = Vector{String}(undef, length(chunks))
-
-    Threads.@threads for idx in eachindex(chunks)
+    for idx in eachindex(chunks)
         results[idx] = if penalty > 0
             run_igblast_chunk(chunks[idx], blastdb_dir, penalty;
-                             species = species, sequence_type = sequence_type)
+                             species = species, sequence_type = sequence_type, threads = threads)
         else
             run_igblast_chunk(chunks[idx], blastdb_dir;
-                             species = species, sequence_type = sequence_type)
+                             species = species, sequence_type = sequence_type, threads = threads)
         end
     end
 
