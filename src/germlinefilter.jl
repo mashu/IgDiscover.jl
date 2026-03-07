@@ -102,6 +102,21 @@ function should_discard(f::UniqueDRatioFilter, ref::FilterCandidate,
     ratio < f.ratio ? @sprintf("Ds_exact_ratio=%.1f,other=%s", ratio, ref.name) : ""
 end
 
+"""
+    pairwise_filters(criteria::GermlineFilterCriteria) -> Vector{CandidateFilter}
+
+Build the list of pairwise filters from criteria. Add new filter types by extending
+`CandidateFilter` and `should_discard`, then appending to this function.
+"""
+function pairwise_filters(criteria::GermlineFilterCriteria)
+    filters = CandidateFilter[IdenticalSequenceFilter()]
+    criteria.cross_mapping_ratio > 0 && push!(filters, CrossMappingFilter(criteria.cross_mapping_ratio))
+    criteria.clonotype_ratio     > 0 && push!(filters, ClonotypeRatioFilter(criteria.clonotype_ratio))
+    criteria.exact_ratio         > 0 && push!(filters, ExactRatioFilter(criteria.exact_ratio))
+    criteria.unique_d_ratio      > 0 && push!(filters, UniqueDRatioFilter(criteria.unique_d_ratio, criteria.unique_d_threshold))
+    filters
+end
+
 # ─── Whitelist ───
 
 struct Whitelist
@@ -161,11 +176,7 @@ function germline_filter!(
 
     @info "$(sum(candidates.is_filtered .== 0)) remain after per-entry filtering"
 
-    filters = CandidateFilter[IdenticalSequenceFilter()]
-    criteria.cross_mapping_ratio > 0 && push!(filters, CrossMappingFilter(criteria.cross_mapping_ratio))
-    criteria.clonotype_ratio     > 0 && push!(filters, ClonotypeRatioFilter(criteria.clonotype_ratio))
-    criteria.exact_ratio         > 0 && push!(filters, ExactRatioFilter(criteria.exact_ratio))
-    criteria.unique_d_ratio      > 0 && push!(filters, UniqueDRatioFilter(criteria.unique_d_ratio, criteria.unique_d_threshold))
+    filters = pairwise_filters(criteria)
 
     has_db_diff = hasproperty(candidates, :database_diff)
     has_cdr3_start = hasproperty(candidates, :CDR3_start)

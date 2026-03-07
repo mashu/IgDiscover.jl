@@ -1,48 +1,73 @@
 # Multiple sequence alignment and consensus computation
+#
+# Aligners are extensible via the Aligner abstract type: define a struct <: Aligner,
+# implement run_align(::YourAligner, fasta_str, threads), and register in ALIGNERS.
+
+abstract type Aligner end
+
+"""Run the aligner on FASTA string; returns raw alignment output as String."""
+function run_align end
+
+struct MafftAligner <: Aligner end
+function run_align(::MafftAligner, fasta_str::String, threads::Int)
+    read(pipeline(IOBuffer(fasta_str), `mafft --quiet --thread $threads -`), String)
+end
+
+struct ClustaloAligner <: Aligner end
+function run_align(::ClustaloAligner, fasta_str::String, threads::Int)
+    read(pipeline(IOBuffer(fasta_str), `clustalo --threads=$threads --infile=-`), String)
+end
+
+struct MuscleAligner <: Aligner
+    variant::String  # "muscle", "muscle-fast", "muscle-medium"
+end
+function run_align(a::MuscleAligner, fasta_str::String, ::Int)
+    tmpin = tempname() * ".fa"
+    tmpout = tempname() * ".afa"
+    write(tmpin, fasta_str)
+    p = run(pipeline(`muscle -align $tmpin -output $tmpout`, stderr=devnull); wait=false)
+    wait(p)
+    result = if p.exitcode == 0 && isfile(tmpout) && filesize(tmpout) > 0
+        read(tmpout, String)
+    else
+        rm(tmpout; force=true)
+        run(pipeline(`muscle -quiet -in $tmpin -out $tmpout`, stderr=devnull))
+        read(tmpout, String)
+    end
+    rm(tmpin; force=true)
+    rm(tmpout; force=true)
+    result
+end
+
+const ALIGNERS = Dict{String, Aligner}(
+    "mafft" => MafftAligner(),
+    "clustalo" => ClustaloAligner(),
+    "muscle" => MuscleAligner("muscle"),
+    "muscle-fast" => MuscleAligner("muscle-fast"),
+    "muscle-medium" => MuscleAligner("muscle-medium"),
+)
+
+aligner_for_program(program::String) = get(ALIGNERS, program) do
+    error("Alignment program '$program' not supported. Registered: ", join(sort!(collect(keys(ALIGNERS))), ", "))
+end
 
 """
     multialign(sequences::Dict{String,String}; program="muscle-fast", threads=Sys.CPU_THREADS) -> Dict{String,String}
 
 Run a multiple sequence alignment program and return aligned sequences.
-Supported programs: "muscle", "muscle-fast", "muscle-medium", "mafft", "clustalo".
+Dispatch is via the `Aligner` abstraction; register new programs in `ALIGNERS` and implement `run_align`.
 """
 function multialign(sequences::Dict{String,String};
                     program::String = "muscle-fast",
                     threads::Int = Sys.CPU_THREADS)
-
     isempty(sequences) && return Dict{String,String}()
-
     fasta_input = IOBuffer()
     for (name, seq) in sequences
         println(fasta_input, ">", name)
         println(fasta_input, seq)
     end
     fasta_str = String(take!(fasta_input))
-
-    output = if program == "mafft"
-        read(pipeline(IOBuffer(fasta_str), `mafft --quiet --thread $threads -`), String)
-    elseif program == "clustalo"
-        read(pipeline(IOBuffer(fasta_str), `clustalo --threads=$threads --infile=-`), String)
-    elseif program in ("muscle", "muscle-fast", "muscle-medium")
-        tmpin = tempname() * ".fa"
-        tmpout = tempname() * ".afa"
-        write(tmpin, fasta_str)
-        p = run(pipeline(`muscle -align $tmpin -output $tmpout`, stderr=devnull); wait=false)
-        wait(p)
-        result = if p.exitcode == 0 && isfile(tmpout) && filesize(tmpout) > 0
-            read(tmpout, String)
-        else
-            rm(tmpout; force=true)
-            run(pipeline(`muscle -quiet -in $tmpin -out $tmpout`, stderr=devnull))
-            read(tmpout, String)
-        end
-        rm(tmpin; force=true)
-        rm(tmpout; force=true)
-        result
-    else
-        error("Alignment program '$program' not supported")
-    end
-
+    output = run_align(aligner_for_program(program), fasta_str, threads)
     parse_fasta_string(output)
 end
 
