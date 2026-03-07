@@ -45,7 +45,7 @@ function discover_j_genes(
         isempty(j_seqs) && continue
 
         cons = iterative_consensus(j_seqs;
-            program="muscle-medium",
+            program=config.multialign_program,
             threshold=config.consensus_threshold / 100,
             maximum_subsample_size=config.subsample)
         isempty(cons) && continue

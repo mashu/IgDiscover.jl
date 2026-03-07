@@ -122,6 +122,7 @@ function pick_group_representative(
     use_consensus::Bool,
     counter::ConsensusCounter,
     group_by_cdr3::Bool,
+    program::String="muscle-fast",
 )
     n = length(cluster)
     cdr3_label = group_by_cdr3 ? cluster[1][2] : ""
@@ -132,7 +133,7 @@ function pick_group_representative(
     end
 
     seqs = [r[1].sequence for r in cluster]
-    cons = simple_consensus_for_group(seqs; threshold=GROUP_CONSENSUS_THRESHOLD)
+    cons = simple_consensus_for_group(seqs; program=program, threshold=GROUP_CONSENSUS_THRESHOLD)
 
     if occursin('N', cons)
         rec = cluster[1][1]
@@ -142,11 +143,11 @@ function pick_group_representative(
     make_group_record(counter(), cons, barcode, n, cdr3_label)
 end
 
-function simple_consensus_for_group(sequences::Vector{String}; threshold::Float64=GROUP_CONSENSUS_THRESHOLD)
+function simple_consensus_for_group(sequences::Vector{String}; program::String="muscle-fast", threshold::Float64=GROUP_CONSENSUS_THRESHOLD)
     isempty(sequences) && return ""
     length(sequences) == 1 && return sequences[1]
     seqs = Dict(string(i) => s for (i, s) in enumerate(sequences))
-    aligned = multialign(seqs; program="muscle-fast")
+    aligned = multialign(seqs; program=program)
     consensus_sequence(collect(values(aligned)); threshold=threshold, ambiguous='N')
 end
 
@@ -202,7 +203,7 @@ function group_reads(
 
         for cluster in clusters
             push!(out_records, pick_group_representative(
-                cluster, barcode, config.barcode_consensus, counter, group_by_cdr3))
+                cluster, barcode, config.barcode_consensus, counter, group_by_cdr3, config.multialign_program))
         end
     end
 

@@ -1,12 +1,12 @@
 # Shared utilities — pure functions used across modules
 
 """
-    tallies(v) -> Dict{eltype(v), Int}
+    tallies(v) -> Dict{T, Int}
 
-Count occurrences of each element in `v`.
+Count occurrences of each element in `v`. Uses parametric type `T` from `AbstractVector{T}`.
 """
-function tallies(v::AbstractVector)
-    d = Dict{eltype(v),Int}()
+function tallies(v::AbstractVector{T}) where T
+    d = Dict{T,Int}()
     for x in v
         d[x] = get(d, x, 0) + 1
     end
@@ -18,7 +18,7 @@ end
 
 Return the most frequent element and its count.
 """
-function most_common(v::AbstractVector)
+function most_common(v::AbstractVector{T}) where T
     t = tallies(v)
     isempty(t) && return (first(v), 0)
     first(sort!(collect(t); by=last, rev=true))
@@ -80,24 +80,26 @@ function ensure_column!(df::DataFrame, col::Symbol, default::Float64)
 end
 
 # ─── Generic TOML → struct constructor ───
+#
+# Dispatch on value type: nested Dict → recurse; scalar → convert.
+# No runtime type checks; compile-time dispatch only.
+
+from_toml_field(::Type{T}, raw::Dict{K,V}) where {T,K,V} = from_toml(T, raw)
+from_toml_field(::Type{T}, raw) where T = convert(T, raw)
 
 """
     from_toml(T, d::Dict) -> T
 
 Construct a struct `T` from a TOML dictionary by matching field names to keys.
 Each field is converted to its declared type. Nested structs are constructed recursively
-if the corresponding value is a `Dict`.
+via dispatch when the value is a `Dict`.
 """
-function from_toml(::Type{T}, d::Dict) where T
+function from_toml(::Type{T}, d::Dict{K,V}) where {T,K,V}
     args = ntuple(fieldcount(T)) do i
         fname = String(fieldname(T, i))
         ftype = fieldtype(T, i)
         raw = d[fname]
-        if raw isa Dict && !(ftype <: Dict)
-            from_toml(ftype, raw)
-        else
-            convert(ftype, raw)
-        end
+        from_toml_field(ftype, raw)
     end
     T(args...)
 end

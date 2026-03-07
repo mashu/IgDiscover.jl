@@ -43,6 +43,7 @@ struct DiscoveryParams
     d_evalue::Float64
     seed::Int
     cdr3_counts::Dict{String,Int}
+    multialign_program::String
 end
 
 struct GroupStats
@@ -112,7 +113,7 @@ function sibling_consensus(gene::String, group::DataFrame, params::DiscoveryPara
     seqs = filter(!isempty, String.(group.V_nt))
     isempty(seqs) && return ""
     cons = iterative_consensus(seqs;
-        program="muscle-medium",
+        program=params.multialign_program,
         threshold=params.consensus_threshold / 100,
         maximum_subsample_size=params.downsample)
     if haskey(params.database, gene)
@@ -306,7 +307,7 @@ function discover_germline(
     params = DiscoveryParams(
         database, windows, true, config.consensus_threshold, MAX_SUBSAMPLE,
         6, config.subsample, 0, max(config.exact_copies, 1),
-        config.d_coverage, 1e-4, config.seed, cdr3_counts)
+        config.d_coverage, 1e-4, config.seed, cdr3_counts, config.multialign_program)
 
     all_candidates = Candidate[]
     namer = NameGenerator()

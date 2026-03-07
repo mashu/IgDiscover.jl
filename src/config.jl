@@ -46,6 +46,9 @@ end
     Config
 
 Complete IgDiscover configuration. Loaded from a TOML file merged with defaults.
+
+Note: `merge_program`, `flash_maximum_overlap`, `minimum_merged_read_length`, and `stranded`
+are parsed and stored but not yet used (reserved for future read-merge and strand-aware support).
 """
 struct Config
     species::String
@@ -97,10 +100,10 @@ function load_config()
     load_config(path)
 end
 
-merge_value(existing::Dict, incoming::Dict) = merge!(existing, incoming)
+merge_value(existing::Dict{K,V}, incoming::Dict{K,V}) where {K,V} = merge!(existing, incoming)
 merge_value(_, incoming) = incoming
 
-function merge_config(defaults::Dict, user::Dict)
+function merge_config(defaults::Dict{String,V}, user::Dict{String,V}) where V
     result = deepcopy(defaults)
     for (k, v) in user
         result[k] = haskey(result, k) ? merge_value(result[k], v) : v
@@ -114,7 +117,7 @@ end
 Convert a merged TOML dictionary into a fully-typed `Config`.
 Uses `from_toml` for nested structs, eliminating manual field extraction.
 """
-function parse_config(d::Dict)
+function parse_config(d::Dict{String,V}) where V
     Config(
         get(d, "species", ""),
         get(d, "sequence_type", "Ig"),
