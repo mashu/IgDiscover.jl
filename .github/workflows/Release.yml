@@ -1,0 +1,102 @@
+# Build standalone IgDiscover binaries on tagged release (v*).
+# Uploads platform-specific archives to the GitHub Release.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: Linux x86_64
+            asset: linux-x86_64
+          - os: macos-latest
+            name: macOS
+            asset: macos-aarch64
+          - os: windows-latest
+            name: Windows x86_64
+            asset: windows-x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.10'
+
+      - name: Install build dependencies
+        run: julia -e 'using Pkg; Pkg.activate("."); Pkg.instantiate(; target="build")'
+
+      - name: Build standalone app
+        run: julia --project=. build/build_sysimage.jl --app
+        timeout-minutes: 25
+
+      - name: Archive app (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          cd build
+          zip -r "IgDiscover-${{ github.ref_name }}-${{ matrix.asset }}.zip" IgDiscover
+
+      - name: Archive app (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          Compress-Archive -Path build/IgDiscover -DestinationPath "IgDiscover-${{ github.ref_name }}-${{ matrix.asset }}.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: IgDiscover-${{ matrix.asset }}
+          path: IgDiscover-${{ github.ref_name }}-${{ matrix.asset }}.zip
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Move artifacts to release assets
+        run: |
+          mkdir -p release-assets
+          for d in artifacts/IgDiscover-*/; do
+            mv "$d"/*.zip release-assets/ 2>/dev/null || true
+          done
+          ls -la release-assets/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: IgDiscover.jl ${{ github.ref_name }}
+          body: |
+            Standalone binaries for IgDiscover.jl (no Julia installation required).
+
+            **Downloads:** see assets below. Extract the archive and run `bin/igdiscover` (or `bin/igdiscover.exe` on Windows).
+
+            **Requirements:** IgBLAST, MUSCLE (and optionally PEAR) must be installed on your system; see [README](https://github.com/${{ github.repository }}#external-dependencies).
+          files: release-assets/*.zip
+          draft: false
+          make_latest: true

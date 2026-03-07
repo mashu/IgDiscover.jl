@@ -13,7 +13,7 @@
 #   julia --sysimage=build/IgDiscover.so --project=. bin/igdiscover.jl run
 #
 # Prerequisites:
-#   julia -e 'using Pkg; Pkg.add("PackageCompiler")'
+#   julia -e 'using Pkg; Pkg.activate("."); Pkg.instantiate(; target="build")'
 
 using PackageCompiler
 

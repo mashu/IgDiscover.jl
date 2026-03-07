@@ -1,6 +1,7 @@
 # IgDiscover.jl
 
 [![CI](https://github.com/mashu/IgDiscover.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/mashu/IgDiscover.jl/actions/workflows/CI.yml)
+[![Release](https://github.com/mashu/IgDiscover.jl/actions/workflows/Release.yml/badge.svg)](https://github.com/mashu/IgDiscover.jl/actions/workflows/Release.yml)
 [![codecov](https://codecov.io/gh/mashu/IgDiscover.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/mashu/IgDiscover.jl)
 [![Stable Docs](https://img.shields.io/badge/docs-stable-blue.svg)](https://mashu.github.io/IgDiscover.jl/stable/)
 [![Dev Docs](https://img.shields.io/badge/docs-dev-blue.svg)](https://mashu.github.io/IgDiscover.jl/dev/)
@@ -100,13 +101,27 @@ make test-interactive
 
 The Docker image installs both Python igdiscover 0.15.1 (via bioconda, including igblast, muscle, pear) and Julia IgDiscover.jl, runs both on identical data, and compares `filtered.tsv.gz` and `new_V_germline.fasta` outputs.
 
+## Binaries (no Julia required)
+
+Pre-built standalone binaries are available on [GitHub Releases](https://github.com/mashu/IgDiscover.jl/releases) for Linux (x86_64), macOS (ARM64), and Windows (x86_64). They are built automatically on every tagged release (e.g. `v0.1.0`).
+
+1. Download the archive for your platform from the [latest release](https://github.com/mashu/IgDiscover.jl/releases/latest).
+2. Extract it and run `bin/igdiscover` (or `bin/igdiscover.exe` on Windows).
+3. Ensure [external dependencies](#external-dependencies) (IgBLAST, MUSCLE, optionally PEAR) are installed.
+
+```bash
+./bin/igdiscover --help
+./bin/igdiscover init my_analysis database/ reads.fasta.gz
+./bin/igdiscover run my_analysis
+```
+
 ## Building a System Image
 
 For near-instant startup (useful in production or interactive use):
 
 ```bash
-# Install PackageCompiler (one-time)
-julia -e 'using Pkg; Pkg.add("PackageCompiler")'
+# Install build dependencies (one-time; PackageCompiler is in [extras])
+julia -e 'using Pkg; Pkg.activate("."); Pkg.instantiate(; target="build")'
 
 # Build system image (~5 min)
 julia --project=. build/build_sysimage.jl
