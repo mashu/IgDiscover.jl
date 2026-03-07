@@ -226,6 +226,45 @@ function reservoir_sample(population::AbstractVector{T}, k::Int) where T
 end
 
 # ─── Affine gap alignment for describe_nt_change ───
+# Traceback state dispatched via AlignState; no if state == :M / :V / :H in the loop.
+
+abstract type AlignState end
+struct MState <: AlignState end
+struct VState <: AlignState end
+struct HState <: AlignState end
+
+initial_align_state(optimal::Int, M::Matrix{Int}, V::Matrix{Int}, H::Matrix{Int}, m::Int, n::Int) =
+    optimal == M[m+1, n+1] ? MState() : (optimal == V[m+1, n+1] ? VState() : HState())
+
+next_align_state(ms::Int, vs::Int, hs::Int) =
+    hs > ms && hs > vs ? HState() : (vs > ms ? VState() : MState())
+
+"""One traceback step: (ref_char, query_char, i_next, j_next, err_inc, next_state)."""
+function traceback_step end
+
+function traceback_step(::MState, i::Int, j::Int, M::Matrix{Int}, V::Matrix{Int}, H::Matrix{Int},
+                        ref::AbstractString, query::AbstractString, gap_open::Int, gap_extend::Int)
+    ref_c = ref[i-1]
+    query_c = query[j-1]
+    ms, vs, hs = M[i-1, j-1], V[i-1, j-1], H[i-1, j-1]
+    (ref_c, query_c, i - 1, j - 1, ref_c != query_c ? 1 : 0, next_align_state(ms, vs, hs))
+end
+
+function traceback_step(::VState, i::Int, j::Int, M::Matrix{Int}, V::Matrix{Int}, H::Matrix{Int},
+                        ref::AbstractString, query::AbstractString, gap_open::Int, gap_extend::Int)
+    ms = M[i-1, j] + gap_open
+    vs = V[i-1, j] + gap_extend
+    hs = H[i-1, j] + gap_open
+    (ref[i-1], '-', i - 1, j, 1, next_align_state(ms, vs, hs))
+end
+
+function traceback_step(::HState, i::Int, j::Int, M::Matrix{Int}, V::Matrix{Int}, H::Matrix{Int},
+                        ref::AbstractString, query::AbstractString, gap_open::Int, gap_extend::Int)
+    ms = M[i, j-1] + gap_open
+    vs = V[i, j-1] + gap_open
+    hs = H[i, j-1] + gap_extend
+    ('-', query[j-1], i, j - 1, 1, next_align_state(ms, vs, hs))
+end
 
 struct Alignment
     ref_row::String
@@ -238,6 +277,7 @@ end
     align_affine(ref, query; gap_open=-6, gap_extend=-1, mismatch=-3, match_score=1) -> Alignment
 
 Global alignment with affine gap penalties (BWA defaults).
+Traceback uses AlignState dispatch (MState, VState, HState).
 """
 function align_affine(ref::AbstractString, query::AbstractString;
                      gap_open::Int = -6, gap_extend::Int = -1,
@@ -273,10 +313,7 @@ function align_affine(ref::AbstractString, query::AbstractString;
     end
 
     optimal = max(M[m+1, n+1], V[m+1, n+1], H[m+1, n+1])
-    state = if optimal == M[m+1, n+1]; :M
-    elseif optimal == V[m+1, n+1]; :V
-    else; :H
-    end
+    state = initial_align_state(optimal, M, V, H, m, n)
 
     ref_row = Char[]
     query_row = Char[]
@@ -284,39 +321,67 @@ function align_affine(ref::AbstractString, query::AbstractString;
     errors = 0
 
     while i > 1 || j > 1
-        if state == :M
-            push!(ref_row, ref[i-1])
-            push!(query_row, query[j-1])
-            ref[i-1] != query[j-1] && (errors += 1)
-            ms, vs, hs = M[i-1, j-1], V[i-1, j-1], H[i-1, j-1]
-            i -= 1; j -= 1
-        elseif state == :V
-            push!(ref_row, ref[i-1])
-            push!(query_row, '-')
-            errors += 1
-            ms = M[i-1, j] + gap_open
-            vs = V[i-1, j] + gap_extend
-            hs = H[i-1, j] + gap_open
-            i -= 1
-        else
-            push!(ref_row, '-')
-            push!(query_row, query[j-1])
-            errors += 1
-            ms = M[i, j-1] + gap_open
-            vs = V[i, j-1] + gap_open
-            hs = H[i, j-1] + gap_extend
-            j -= 1
-        end
-        state = hs > ms && hs > vs ? :H : (vs > ms ? :V : :M)
+        ref_c, query_c, i, j, err_inc, state = traceback_step(state, i, j, M, V, H, ref, query, gap_open, gap_extend)
+        push!(ref_row, ref_c)
+        push!(query_row, query_c)
+        errors += err_inc
     end
 
     Alignment(String(reverse(ref_row)), String(reverse(query_row)), optimal, errors)
+end
+
+# ─── describe_nt_change: column kinds dispatched ───
+
+abstract type ColumnKind end
+struct MatchCol <: ColumnKind end
+struct InsertCol <: ColumnKind end
+struct DeleteCol <: ColumnKind end
+struct SubstCol <: ColumnKind end
+
+column_kind(c1::Char, c2::Char) =
+    c1 == c2 ? MatchCol() : (c1 == '-' ? InsertCol() : (c2 == '-' ? DeleteCol() : SubstCol()))
+
+"""Process one column (or run for indels); return (next_idx, next_i)."""
+function apply_column! end
+
+apply_column!(changes::Vector{String}, idx::Int, i::Int, aln::Alignment, ::MatchCol) =
+    (idx + 1, i + 1)
+
+function apply_column!(changes::Vector{String}, idx::Int, i::Int, aln::Alignment, ::InsertCol)
+    buf = IOBuffer()
+    i_end = i
+    while i_end <= length(aln.ref_row) && aln.ref_row[i_end] == '-'
+        write(buf, aln.query_row[i_end])
+        i_end += 1
+    end
+    push!(changes, "$(idx-1)_$(idx)ins$(String(take!(buf)))")
+    (idx, i_end)
+end
+
+function apply_column!(changes::Vector{String}, idx::Int, i::Int, aln::Alignment, ::DeleteCol)
+    buf = IOBuffer()
+    start_idx = idx
+    i_end = i
+    while i_end <= length(aln.ref_row) && aln.query_row[i_end] == '-'
+        write(buf, aln.ref_row[i_end])
+        i_end += 1
+        idx += 1
+    end
+    push!(changes, "$(start_idx)_$(idx-1)del$(String(take!(buf)))")
+    (idx, i_end)
+end
+
+apply_column!(changes::Vector{String}, idx::Int, i::Int, aln::Alignment, ::SubstCol) = begin
+    c1, c2 = aln.ref_row[i], aln.query_row[i]
+    push!(changes, "$(idx)$(c1)>$(c2)")
+    (idx + 1, i + 1)
 end
 
 """
     describe_nt_change(ref, query) -> String
 
 Describe nucleotide changes between ref and query using HGVS-like notation.
+Column type (match/insert/delete/subst) is dispatched via ColumnKind.
 """
 function describe_nt_change(ref::AbstractString, query::AbstractString)
     aln = align_affine(ref, query)
@@ -324,31 +389,8 @@ function describe_nt_change(ref::AbstractString, query::AbstractString)
     idx = 1
     i = 1
     while i <= length(aln.ref_row)
-        c1, c2 = aln.ref_row[i], aln.query_row[i]
-        if c1 == c2
-            idx += 1
-            i += 1
-        elseif c1 == '-'
-            inserted = IOBuffer()
-            while i <= length(aln.ref_row) && aln.ref_row[i] == '-'
-                write(inserted, aln.query_row[i])
-                i += 1
-            end
-            push!(changes, "$(idx-1)_$(idx)ins$(String(take!(inserted)))")
-        elseif c2 == '-'
-            deleted = IOBuffer()
-            start_idx = idx
-            while i <= length(aln.ref_row) && aln.query_row[i] == '-'
-                write(deleted, aln.ref_row[i])
-                i += 1
-                idx += 1
-            end
-            push!(changes, "$(start_idx)_$(idx-1)del$(String(take!(deleted)))")
-        else
-            push!(changes, "$(idx)$(c1)>$(c2)")
-            idx += 1
-            i += 1
-        end
+        kind = column_kind(aln.ref_row[i], aln.query_row[i])
+        idx, i = apply_column!(changes, idx, i, aln, kind)
     end
     join(changes, "; ")
 end
