@@ -295,9 +295,9 @@ using DataFrames
     end
 
     @testset "J discovery filter helpers" begin
-        j1 = IgDiscover.JCandidate("J1*01", "J1*01", 100, 10, 0.0, 0.0, "ATCGATCG")
-        j2 = IgDiscover.JCandidate("J1*02", "J1*02",  10,  5, 0.0, 0.0, "ATCGATCC")
-        j3 = IgDiscover.JCandidate("J1*03", "J1*03",   1,  1, 0.0, 0.0, "ATCGATCA")
+        j1 = IgDiscover.JCandidate("J1*01", "J1*01", 100, 10, "ATCGATCG")
+        j2 = IgDiscover.JCandidate("J1*02", "J1*02",  10,  5, "ATCGATCC")
+        j3 = IgDiscover.JCandidate("J1*03", "J1*03",   1,  1, "ATCGATCA")
 
         filtered = IgDiscover.filter_j_alleles([j1, j2, j3], 0.2)
         @test j1 in filtered

@@ -23,9 +23,7 @@ end
 Precomputed database lookups for augmentation: gene resolvers, CDR3 reference positions.
 """
 struct AugmentContext
-    resolve_v::GeneResolver
-    resolve_d::GeneResolver
-    resolve_j::GeneResolver
+    resolvers::NamedTuple{(:v, :d, :j), Tuple{GeneResolver, GeneResolver, GeneResolver}}
     v_cdr3_starts::Dict{String,Dict{String,Int}}
     j_cdr3_ends::Dict{String,Dict{String,Int}}
 end
@@ -50,9 +48,19 @@ function AugmentContext(database_dir::AbstractString; sequence_type::String="Ig"
         end
     end
 
-    AugmentContext(GeneResolver(db_v), GeneResolver(db_d), GeneResolver(db_j),
-                   v_cdr3_starts, j_cdr3_ends)
+    resolvers = (v = GeneResolver(db_v), d = GeneResolver(db_d), j = GeneResolver(db_j))
+    AugmentContext(resolvers, v_cdr3_starts, j_cdr3_ends)
 end
+
+# Gene segment column names, used by error/coverage/SHM loops
+const GENE_SEGMENTS = (
+    (prefix = :V, call = :v_call, germline_aln = :v_germline_alignment,
+     sequence_aln = :v_sequence_alignment, identity = :v_identity, resolver = :v),
+    (prefix = :D, call = :d_call, germline_aln = :d_germline_alignment,
+     sequence_aln = :d_sequence_alignment, identity = :d_identity, resolver = :d),
+    (prefix = :J, call = :j_call, germline_aln = :j_germline_alignment,
+     sequence_aln = :j_sequence_alignment, identity = :j_identity, resolver = :j),
+)
 
 # ─── Safe column access helpers ───
 
@@ -141,17 +149,11 @@ function build_short_id_map(db::Dict{String,String})
             get!(out, short, name)
             gene_allele = parts[2]
             get!(out, gene_allele, name)
-            if occursin('*', gene_allele)
-                gene_only = first(split(gene_allele, '*'))
-                get!(out, gene_only, name)
-            end
+            occursin('*', gene_allele) && get!(out, gene_family(gene_allele), name)
         end
     end
     out
 end
-
-full_to_short(full_name::AbstractString) =
-    (p = split(full_name, '|'); length(p) >= 2 ? p[2] : full_name)
 
 # ─── Augmentation steps ───
 
@@ -181,38 +183,34 @@ end
 """Compute V_SHM and J_SHM from identity columns."""
 function augment_shm!(result::DataFrame)
     n = nrow(result)
-    result.V_SHM = [let v = col_float(result, :v_identity, i, NaN)
-        isnan(v) ? 0.0 : 100.0 - v end for i in 1:n]
-    result.J_SHM = [let v = col_float(result, :j_identity, i, NaN)
-        isnan(v) ? 0.0 : 100.0 - v end for i in 1:n]
+    for seg in (GENE_SEGMENTS[1], GENE_SEGMENTS[3])  # V and J only
+        shm_col = Symbol(seg.prefix, :_SHM)
+        result[!, shm_col] = [let v = col_float(result, seg.identity, i, NaN)
+            isnan(v) ? 0.0 : 100.0 - v end for i in 1:n]
+    end
 end
 
 """Compute V/D/J alignment error counts."""
 function augment_errors!(result::DataFrame)
     n = nrow(result)
-    result.V_errors = [count_alignment_errors(
-        col_str(result, :v_germline_alignment, i),
-        col_str(result, :v_sequence_alignment, i)) for i in 1:n]
-    result.D_errors = [count_alignment_errors(
-        col_str(result, :d_germline_alignment, i),
-        col_str(result, :d_sequence_alignment, i)) for i in 1:n]
-    result.J_errors = [count_alignment_errors(
-        col_str(result, :j_germline_alignment, i),
-        col_str(result, :j_sequence_alignment, i)) for i in 1:n]
+    for seg in GENE_SEGMENTS
+        err_col = Symbol(seg.prefix, :_errors)
+        result[!, err_col] = [count_alignment_errors(
+            col_str(result, seg.germline_aln, i),
+            col_str(result, seg.sequence_aln, i)) for i in 1:n]
+    end
 end
 
 """Compute V/D/J reference coverage fractions."""
 function augment_coverage!(result::DataFrame, ctx::AugmentContext)
     n = nrow(result)
-    result.V_covered = [alignment_coverage(
-        col_str(result, :v_germline_alignment, i),
-        get(ctx.resolve_v.sequences, ctx.resolve_v(col_str(result, :v_call, i)), "") |> length) for i in 1:n]
-    result.D_covered = [alignment_coverage(
-        col_str(result, :d_germline_alignment, i),
-        get(ctx.resolve_d.sequences, ctx.resolve_d(col_str(result, :d_call, i)), "") |> length) for i in 1:n]
-    result.J_covered = [alignment_coverage(
-        col_str(result, :j_germline_alignment, i),
-        get(ctx.resolve_j.sequences, ctx.resolve_j(col_str(result, :j_call, i)), "") |> length) for i in 1:n]
+    for seg in GENE_SEGMENTS
+        cov_col  = Symbol(seg.prefix, :_covered)
+        resolver = getfield(ctx.resolvers, seg.resolver)
+        result[!, cov_col] = [alignment_coverage(
+            col_str(result, seg.germline_aln, i),
+            get(resolver.sequences, resolver(col_str(result, seg.call, i)), "") |> length) for i in 1:n]
+    end
 end
 
 """Compute CDR3 nucleotide/amino-acid sequences and boundaries."""
@@ -220,14 +218,15 @@ function augment_cdr3!(result::DataFrame, ctx::AugmentContext)
     n = nrow(result)
 
     for col in (:cdr3, :cdr3_aa)
-        hasproperty(result, col) || (result[!, col] = fill("", n))
-        result[!, col] = Vector{String}(coalesce.(result[!, col], ""))
+        ensure_column!(result, col, "")
     end
     for col in (:cdr3_start, :cdr3_end)
-        hasproperty(result, col) || (result[!, col] = zeros(Int, n))
-        result[!, col] = Vector{Int}(coalesce.(result[!, col], 0))
+        ensure_column!(result, col, 0)
     end
     result.V_CDR3_start = zeros(Int, n)
+
+    resolve_v = ctx.resolvers.v
+    resolve_j = ctx.resolvers.j
 
     for i in 1:n
         vc     = col_str(result, :v_call, i)
@@ -236,8 +235,8 @@ function augment_cdr3!(result::DataFrame, ctx::AugmentContext)
         seq    = col_str(result, :sequence, i)
         (isempty(vc) || isempty(jc) || isempty(locus) || isempty(seq)) && continue
 
-        vc_full = ctx.resolve_v(vc)
-        jc_full = ctx.resolve_j(jc)
+        vc_full = resolve_v(vc)
+        jc_full = resolve_j(jc)
 
         cdr3_ref_start = get(get(ctx.v_cdr3_starts, locus, Dict{String,Int}()), vc_full, 0)
         cdr3_ref_start == 0 && continue
@@ -305,11 +304,10 @@ end
 """Shorten gene calls to allele form (e.g. IGHV1-18*01)."""
 function shorten_gene_calls!(result::DataFrame, ctx::AugmentContext)
     n = nrow(result)
-    resolvers = (v_call = ctx.resolve_v, d_call = ctx.resolve_d, j_call = ctx.resolve_j)
-    for col in (:v_call, :d_call, :j_call)
+    for (col, key) in ((:v_call, :v), (:d_call, :d), (:j_call, :j))
         hasproperty(result, col) || continue
-        resolve = getfield(resolvers, col)
-        result[!, col] = [full_to_short(resolve(coalesce(result[i, col], ""))) for i in 1:n]
+        resolve = getfield(ctx.resolvers, key)
+        result[!, col] = [allele_name_from_header(resolve(coalesce(result[i, col], ""))) for i in 1:n]
     end
 end
 
@@ -319,18 +317,6 @@ end
     augment_table(airr_df, database_dir; sequence_type) -> DataFrame
 
 Add IgDiscover-specific columns to an AIRR-format IgBLAST table.
-
-Steps (each a separate testable function):
-1. Strip leading '%' from gene calls
-2. Parse FASTA headers → count, barcode
-3. Compute SHM (V_SHM, J_SHM)
-4. Compute alignment errors (V/D/J)
-5. Compute reference coverage (V/D/J)
-6. Detect CDR3 boundaries and extract sequences
-7. Extract V nucleotides
-8. Ensure d_support column
-9. Normalize stop_codon
-10. Shorten gene calls to allele form
 """
 function augment_table(
     airr_df::DataFrame,

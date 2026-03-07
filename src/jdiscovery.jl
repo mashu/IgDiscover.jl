@@ -24,10 +24,7 @@ function discover_j_genes(
     hasproperty(table, :j_call)  || error("Table missing j_call column")
     hasproperty(table, :J_errors) || error("Table missing J_errors column")
 
-    for col in (:cdr3,)
-        hasproperty(table, col) || (table[!, col] = fill("", nrow(table)))
-        table[!, col] = String.(coalesce.(table[!, col], ""))
-    end
+    ensure_column!(table, :cdr3, "")
 
     candidates = JCandidate[]
     namer = NameGenerator()
@@ -63,9 +60,7 @@ function discover_j_genes(
 
         unique_cdr3s = length(unique(filter(!isempty, String.(exact_group.cdr3))))
 
-        push!(candidates, JCandidate(
-            namer(seq_id), gene,
-            nrow(exact_group), unique_cdr3s, cons))
+        push!(candidates, JCandidate(namer(seq_id), gene, nrow(exact_group), unique_cdr3s, cons))
     end
 
     isempty(candidates) && return DataFrame()
@@ -85,12 +80,11 @@ Remove alleles below ratio threshold relative to best allele in same gene family
 function filter_j_alleles(candidates::Vector{JCandidate}, allele_ratio::Float64)
     best_exact = Dict{String,Int}()
     for c in candidates
-        family = first(split(c.source, '*'))
-        best_exact[family] = max(get(best_exact, family, 0), c.exact)
+        fam = gene_family(c.source)
+        best_exact[fam] = max(get(best_exact, fam, 0), c.exact)
     end
     filter(candidates) do c
-        family = first(split(c.source, '*'))
-        best = get(best_exact, family, 0)
+        best = get(best_exact, gene_family(c.source), 0)
         best == 0 || c.exact / best >= allele_ratio
     end
 end

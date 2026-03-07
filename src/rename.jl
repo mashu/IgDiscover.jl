@@ -7,8 +7,6 @@
 Rename discovered gene sequences based on closest match to original database.
 Each discovered sequence gets the name of its closest database gene, with
 allele suffixes (*01, *02, ...) assigned by cluster order.
-
-This mirrors igdiscover's rename functionality for output normalization.
 """
 function rename_genes(
     discovered_path::AbstractString,
@@ -21,7 +19,7 @@ function rename_genes(
     database = read_fasta(database_path)
 
     # For each discovered sequence, find the closest database gene
-    closest = Dict{String,Vector{Tuple{String,String,Int}}}()  # gene_base → [(name, seq, dist)]
+    closest = Dict{String,Vector{Tuple{String,Int}}}()  # gene_base → [(seq, dist)]
 
     for rec in discovered
         best_name = ""
@@ -35,20 +33,16 @@ function rename_genes(
             end
         end
 
-        # Extract gene base (before '*')
-        gene_base = occursin('*', best_name) ? first(split(best_name, '*')) : best_name
-        push!(get!(closest, gene_base, Tuple{String,String,Int}[]),
-              (rec.name, rec.sequence, best_dist))
+        base = gene_family(best_name)
+        push!(get!(closest, base, Tuple{String,Int}[]), (rec.sequence, best_dist))
     end
 
     # Assign allele numbers within each gene group, ordered by distance to database
     renamed = FastaRecord[]
-    for (gene_base, alleles) in sort!(collect(closest); by=first)
-        sort!(alleles; by=x -> x[3])  # sort by distance to database
-        for (i, (_, seq, _)) in enumerate(alleles)
-            allele_num = @sprintf("%02d", i)
-            new_name = "$(gene_base)*$(allele_num)"
-            push!(renamed, FastaRecord(new_name, seq))
+    for (base, alleles) in sort!(collect(closest); by=first)
+        sort!(alleles; by=last)
+        for (i, (seq, _)) in enumerate(alleles)
+            push!(renamed, FastaRecord(@sprintf("%s*%02d", base, i), seq))
         end
     end
 

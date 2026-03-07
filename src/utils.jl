@@ -32,14 +32,51 @@ Division that returns 0.0 when `b == 0`.
 safe_divide(a, b) = b == 0 ? 0.0 : Float64(a) / Float64(b)
 
 """
+    gene_family(name) -> String
+
+Extract gene family (everything before '*') from an allele name.
+Returns the full name if no '*' is present.
+"""
+gene_family(name::AbstractString) =
+    occursin('*', name) ? first(split(name, '*')) : String(name)
+
+"""
     is_same_gene(name1, name2) -> Bool
 
 Check if two allele names belong to the same gene (same prefix before '*').
 """
-function is_same_gene(name1::AbstractString, name2::AbstractString)
-    g1 = occursin('*', name1) ? first(split(name1, '*')) : name1
-    g2 = occursin('*', name2) ? first(split(name2, '*')) : name2
-    g1 == g2
+is_same_gene(name1::AbstractString, name2::AbstractString) =
+    gene_family(name1) == gene_family(name2)
+
+# ─── DataFrame column initialization ───
+#
+# These eliminate the repeated hasproperty/fill/coalesce boilerplate
+# that appears in augment.jl, discovery.jl, jdiscovery.jl, and clonotypes.jl.
+
+"""
+    ensure_column!(df, col, default::String)
+    ensure_column!(df, col, default::Int)
+    ensure_column!(df, col, default::Float64)
+
+Ensure `col` exists in `df` with the correct element type, filling missing values with `default`.
+Dispatches on the type of `default`.
+"""
+function ensure_column!(df::DataFrame, col::Symbol, default::String)
+    n = nrow(df)
+    hasproperty(df, col) || (df[!, col] = fill(default, n))
+    df[!, col] = Vector{String}(coalesce.(df[!, col], default))
+end
+
+function ensure_column!(df::DataFrame, col::Symbol, default::Int)
+    n = nrow(df)
+    hasproperty(df, col) || (df[!, col] = fill(default, n))
+    df[!, col] = Vector{Int}(coalesce.(df[!, col], default))
+end
+
+function ensure_column!(df::DataFrame, col::Symbol, default::Float64)
+    n = nrow(df)
+    hasproperty(df, col) || (df[!, col] = fill(default, n))
+    df[!, col] = Vector{Float64}(coalesce.(df[!, col], default))
 end
 
 # ─── Generic TOML → struct constructor ───

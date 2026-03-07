@@ -1,6 +1,4 @@
 # V gene candidate discovery — core algorithm
-#
-# tallies() and most_common() are in utils.jl (shared across modules).
 
 const MINGROUPSIZE = 5
 const MINEXPRESSED = 10
@@ -255,6 +253,24 @@ function discover_gene(gene::String, assignments::DataFrame, params::DiscoveryPa
     candidates
 end
 
+# ─── Prepare table columns for discovery ───
+
+function prepare_discovery_table!(table::DataFrame)
+    for col in (:cdr3, :barcode, :j_call, :d_call, :locus)
+        ensure_column!(table, col, "")
+    end
+    for col in (:cdr3, :j_call, :V_nt)
+        table[!, col] = String.(coalesce.(table[!, col], ""))
+    end
+    for col in (:V_errors, :D_errors, :J_errors, :V_CDR3_start)
+        ensure_column!(table, col, 0)
+    end
+    for col in (:V_SHM, :D_covered)
+        ensure_column!(table, col, 0.0)
+    end
+    hasproperty(table, :d_support) || (table.d_support = fill(Inf, nrow(table)))
+end
+
 # ─── Main entry point ───
 
 """
@@ -279,21 +295,7 @@ function discover_germline(
     end
     hasproperty(table, :V_nt) || error("Table must have V_nt or v_sequence_alignment column")
 
-    for col in (:cdr3, :barcode, :j_call, :d_call, :locus)
-        hasproperty(table, col) || (table[!, col] = fill("", nrow(table)))
-    end
-    for col in (:cdr3, :j_call, :V_nt)
-        table[!, col] = String.(coalesce.(table[!, col], ""))
-    end
-    for col in (:V_errors, :D_errors, :J_errors, :V_CDR3_start)
-        hasproperty(table, col) || (table[!, col] = zeros(Int, nrow(table)))
-        table[!, col] = coalesce.(table[!, col], 0)
-    end
-    for col in (:V_SHM, :D_covered)
-        hasproperty(table, col) || (table[!, col] = zeros(Float64, nrow(table)))
-        table[!, col] = coalesce.(table[!, col], 0.0)
-    end
-    hasproperty(table, :d_support) || (table.d_support = fill(Inf, nrow(table)))
+    prepare_discovery_table!(table)
 
     cdr3_counts = tallies(filter(!isempty, String.(table.cdr3)))
     @info "$(length(cdr3_counts)) unique CDR3s overall"

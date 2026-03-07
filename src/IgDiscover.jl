@@ -49,9 +49,6 @@ export group_reads
 export ClonotypeCaller, call_clonotypes
 
 # ── Precompilation workload ──
-# Exercises core hot paths so they're compiled into the sysimage/cache.
-# This avoids first-call latency for edit_distance, consensus, FASTA I/O,
-# DataFrame manipulation, and config parsing.
 
 @setup_workload begin
     tmpdir = mktempdir()
@@ -69,8 +66,15 @@ export ClonotypeCaller, call_clonotypes
         most_common(["a", "b", "a"])
         safe_divide(10, 5)
         safe_divide(1, 0)
+        gene_family("IGHV1-2*01")
         is_same_gene("IGHV1-2*01", "IGHV1-2*02")
         from_toml(PreprocessingFilter, Dict("v_coverage" => 90.0, "j_coverage" => 60.0, "v_evalue" => 1e-3))
+
+        # DataFrame column helpers
+        df_test = DataFrame(a=["x", missing], b=[1, missing])
+        ensure_column!(df_test, :a, "")
+        ensure_column!(df_test, :b, 0)
+        ensure_column!(df_test, :c, 0.0)
 
         # DNA utilities
         edit_distance("ATCGATCG", "ATCGATCA")
@@ -102,10 +106,6 @@ export ClonotypeCaller, call_clonotypes
         # CDR3
         cdr3_start_in_v("AAA" ^ 30 * "TTTTATTGTGCT", "IGH")
         cdr3_end_in_j("TGGGCAGGG", "IGH")
-
-        # DataFrame basics
-        df = DataFrame(a=["x","y"], b=[1,2])
-        filter(row -> row.b > 1, df)
 
         # Alignment
         align_affine("ATCG", "ATCA")

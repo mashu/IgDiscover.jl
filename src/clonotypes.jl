@@ -10,7 +10,7 @@
 """
     ClonotypeCaller(max_mismatches=1, v_shm_threshold=5.0, sort_by_size=false)
 
-Parameters for clonotype assignment: max CDR3 nucleotide mismatches, V SHM %% threshold,
+Parameters for clonotype assignment: max CDR3 nucleotide mismatches, V SHM % threshold,
 and whether to sort clonotypes by size. Use with [`call_clonotypes`](@ref).
 """
 struct ClonotypeCaller
@@ -47,7 +47,6 @@ function call_clonotypes(table::DataFrame, caller::ClonotypeCaller)
         hasproperty(table, col) || error("Table missing required column: $col")
     end
 
-    # Ensure string columns
     v_calls = String.(coalesce.(table.v_call, ""))
     j_calls = String.(coalesce.(table.j_call, ""))
     cdr3s   = String.(coalesce.(table.cdr3, ""))
@@ -82,7 +81,6 @@ function call_clonotypes(table::DataFrame, caller::ClonotypeCaller)
     clonotype_df.clonotype_id = collect(1:length(representatives))
     clonotype_df.clonotype_size = [length(c) for c in all_clusters]
 
-    # Compute member mutation rates if V_SHM available
     if hasproperty(table, :V_SHM)
         add_mutation_rates!(clonotype_df, table, all_clusters, caller.v_shm_threshold)
     end
@@ -104,30 +102,21 @@ function cluster_cdr3s(members::Vector{ClonotypeMember}, max_mismatches::Int)
     isempty(members) && return Vector{Vector{ClonotypeMember}}()
     length(members) == 1 && return [members]
 
-    # Group by CDR3 string for deduplication
     cdr3_to_members = Dict{String, Vector{ClonotypeMember}}()
     for m in members
         push!(get!(cdr3_to_members, m.cdr3_nt, ClonotypeMember[]), m)
     end
 
     unique_cdr3s = collect(keys(cdr3_to_members))
+    length(unique_cdr3s) == 1 && return [members]
 
-    if length(unique_cdr3s) == 1
-        return [members]
-    end
-
-    # Single-linkage on unique CDR3s
     linked(s, t) = length(s) == length(t) && hamming_distance(s, t) <= max_mismatches
     cdr3_clusters = single_linkage(unique_cdr3s, linked)
 
-    # Expand back to full member lists
-    [reduce(vcat, cdr3_to_members[c] for c in cluster)
-     for cluster in cdr3_clusters]
+    [reduce(vcat, cdr3_to_members[c] for c in cluster) for cluster in cdr3_clusters]
 end
 
-"""
-Pick the least mutated member as clonotype representative.
-"""
+"""Pick the least mutated member as clonotype representative."""
 function pick_representative(members::Vector{ClonotypeMember})
     best = members[1]
     for m in members
@@ -136,9 +125,7 @@ function pick_representative(members::Vector{ClonotypeMember})
     best
 end
 
-"""
-Compute CDR3 and VDJ mutation rate columns for the clonotype table.
-"""
+"""Compute CDR3 mutation rate columns for the clonotype table."""
 function add_mutation_rates!(clonotype_df::DataFrame,
                             table::DataFrame,
                             clusters::Vector{Vector{Int}},
@@ -151,7 +138,7 @@ function add_mutation_rates!(clonotype_df::DataFrame,
 
     for (ci, cluster_indices) in enumerate(clusters)
         length(cluster_indices) <= 1 && continue
-        !has_cdr3 && continue
+        has_cdr3 || continue
 
         # Find reference (lowest V_SHM in cluster)
         ref_idx = cluster_indices[1]
@@ -169,7 +156,6 @@ function add_mutation_rates!(clonotype_df::DataFrame,
         ref_cdr3 = String(coalesce(table.cdr3[ref_idx], ""))
         isempty(ref_cdr3) && continue
 
-        # For the representative row in clonotype_df, compute its own diffrate
         rep_cdr3 = String(coalesce(table.cdr3[cluster_indices[1]], ""))
         if !isempty(rep_cdr3) && !isempty(ref_cdr3)
             d = edit_distance(rep_cdr3, ref_cdr3)
@@ -178,15 +164,6 @@ function add_mutation_rates!(clonotype_df::DataFrame,
     end
 
     clonotype_df.CDR3_nt_mindiffrate = cdr3_nt_mindiffrate
-end
-
-"""
-    write_clonotypes(path, clonotype_df)
-
-Write clonotype table to TSV.
-"""
-function write_clonotypes(path::AbstractString, df::DataFrame)
-    write_table(path, df)
 end
 
 """
