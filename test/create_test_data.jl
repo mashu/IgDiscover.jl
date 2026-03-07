@@ -1,7 +1,7 @@
 #!/usr/bin/env julia
 # create_test_data.jl — Generate a test database and synthetic reads for parity testing.
 #
-# Creates IMGT-style V/D/J FASTA files (with pipe-delimited headers and dots in sequences)
+# Creates V/D/J FASTA files in BLAST-compatible form (allele names, no IMGT dots)
 # and generates synthetic reads that resemble immunoglobulin sequences.
 #
 # Usage:
@@ -13,6 +13,7 @@ using Pkg
 Pkg.activate(joinpath(@__DIR__, ".."))
 
 using Random
+using CodecZlib
 
 # ─── IMGT-style V gene sequences (realistic human IGHV, with dots) ───
 
@@ -68,6 +69,9 @@ const J_GENES = [
 """Remove IMGT dots from a sequence."""
 clean_seq(s::AbstractString) = uppercase(replace(s, "." => ""))
 
+"""Extract allele name from IMGT pipe-delimited header (e.g. IGHV1-18*01) for BLAST-safe FASTA."""
+allele_from_header(h::AbstractString) = (p = split(h, '|'); length(p) >= 2 ? String(p[2]) : String(h))
+
 """Introduce random point mutations at a given rate."""
 function mutate(seq::String, rate::Float64; rng=Random.default_rng())
     bases = ['A', 'C', 'G', 'T']
@@ -91,15 +95,17 @@ end
 function create_database(db_dir::String)
     mkpath(db_dir)
 
+    # Write BLAST-compatible FASTA: allele-only headers, no IMGT dots in sequence
+    # (makeblastdb rejects dots and pipe-heavy headers)
     for (filename, genes) in [("V.fasta", V_GENES), ("D.fasta", D_GENES), ("J.fasta", J_GENES)]
         open(joinpath(db_dir, filename), "w") do io
             for (header, seq) in genes
-                println(io, ">", header)
-                println(io, seq)
+                println(io, ">", allele_from_header(header))
+                println(io, clean_seq(seq))
             end
         end
     end
-    @info "Created IMGT-style database at $db_dir with $(length(V_GENES)) V, $(length(D_GENES)) D, $(length(J_GENES)) J genes"
+    @info "Created BLAST-compatible database at $db_dir with $(length(V_GENES)) V, $(length(D_GENES)) D, $(length(J_GENES)) J genes"
 end
 
 # ─── Synthetic read generation ───
@@ -115,7 +121,6 @@ function generate_reads(output_path::String, n_reads::Int; seed::Int=42)
     open(output_path, "w") do io
         # Use GzipCompressorStream if output is .gz
         stream = if endswith(output_path, ".gz")
-            using CodecZlib
             GzipCompressorStream(io)
         else
             io
@@ -172,10 +177,6 @@ function main()
     create_database(db_dir)
 
     if n_reads > 0
-        # Need CodecZlib for gzipped output
-        if endswith(reads_output, ".gz")
-            @eval using CodecZlib
-        end
         generate_reads(reads_output, n_reads)
     end
 end
