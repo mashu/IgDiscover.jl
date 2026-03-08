@@ -163,20 +163,20 @@ function setup_python_igdiscover(venv_dir::String)
     bin_dir
 end
 
-# ─── Test database creation (IMGT-style headers with dots) ───
+# ─── Test database creation (synthetic sequences with IMGT-style headers) ───
 
 function create_test_database(db_dir::String)
     mkpath(db_dir)
 
-    # V genes with IMGT-style headers and dot-gapped sequences
+    # V genes: synthetic sequences with IMGT-style pipe-delimited headers and dot gaps.
+    # All sequences are purely synthetic (fake SYN* accessions), not from IMGT.
     v_records = [
-        # Realistic IMGT header format with dots in sequence
-        ("M99641|IGHV1-18*01|Homo sapiens|F|V-REGION|188..483|296 nt|1| | | | |296+24=320| | |",
-         "cagg.ttcagctggtgcag...tctggagct...gaggtg...aagaagcctggggcctcagtgaaggtctcctgcaaggcttctggttacaccttt...............accagctatggt...atcagctgggtgcgacaggcccctggacaagggcttgagtggatgggatggatcagcgcttac......aatggtaacacaaactatgcacagaagctccag...ggcagagtcaccatgaccacagacacatccacgagcacagcctacatggagctgaggagcctgagatctgacgacacggccgtgtattactgtgcgagaga"),
-        ("M99641|IGHV1-18*04|Homo sapiens|F|V-REGION|188..483|296 nt|1| | | | |296+24=320| | |",
-         "cagg.ttcagctggtgcag...tctggagct...gaggtg...aagaagcctggggcctcagtgaaggtctcctgcaaggcttctggttacaccttt...............accagctatggt...atcagctgggtgcgacaggcccctggacaagggcttgagtggatgggatggatcagcgcttac......aatggtaacacaaactatgcacagaagctccag...ggcagagtcaccatgaccacagacacatccacgagcacagcctacatggagctgaggagcctgagatctgacgacacggccgtgtattactgtgcgagagg"),
-        ("X62106|IGHV1-2*01|Homo sapiens|F|V-REGION|293..588|296 nt|1| | | | |296+24=320| | |",
-         "cagg.tgcagctggtgcag...tctggggct...gaggtg...aagaagcctggggcctcagtgaaggtctcctgcaaggcttctggatacaccttc...............accggctactatatg...cactgggtgcgacaggcccctggacaagggcttgagtggatgggatggatcaaccctaac......agtggtggcacaaactatgcacagaagtttcag...ggcagggtcaccatgaccagggacacgtccatcagcacagcctacatggagctgagcaggctgagatctgacgacacggccgtgtattactgtgcgagaga"),
+        ("SYN001|IGHV1-18*01|Synthetic|F|V-REGION|1..296|296 nt|1| | | | |296+24=320| | |",
+         "cagg.ttcagctggtgcag...tctggagct...gaggtg...aagaagcctggagcctcagtgaaggtctcctgcaaggcttctggttacaccttt...............accagctatggt...atcagctgggtgcgacaggcccctggacaagggcttgagtggatgggatggatcagcgcatac......aatggtaacaccaactatgcacagaaactccag...ggcagagtcaccatgaccacagacatatccacgagcacagcctacatggagctaaggagcctgagatctgacgacacggccgtgtattactgtgcgagaga"),
+        ("SYN002|IGHV1-18*04|Synthetic|F|V-REGION|1..296|296 nt|1| | | | |296+24=320| | |",
+         "cagg.ttcagctggtgcag...tctggagct...gaggtg...aagaagcctggagcctcagtgaaggtctcctgcaaggcttctggttacaccttt...............accagctatggt...atcagctgggtgcgacaggcccctggacaagggcttgagtggatgggatggatcagcgcatac......aatggtaacaccaactatgcacagaaactccag...ggcagagtcaccatgaccacagacatatccacgagcacagcctacatggagctaaggagcctgagatctgacgacacggccgtgtattactgtgcgagagg"),
+        ("SYN003|IGHV1-2*01|Synthetic|F|V-REGION|1..296|296 nt|1| | | | |296+24=320| | |",
+         "cagg.tgcagctggtgcag...tctggggct...gaggtg...aagaagcctggagcctcagtgaaggtctcctgcaaggcttctggatacaccttc...............accggctactatatg...cactgggtgcgacaggcccctggacaagggcttgagtggatgggatggatcaacccaaac......agtggtggcacaaactatgcacagaagattcag...ggcagggtcaccatgaccagggacacatccatcagcacagcctacatggagctaagcaggctgagatctgacgacacggccgtgtattactgtgcgagaga"),
     ]
 
     open(joinpath(db_dir, "V.fasta"), "w") do io
@@ -186,10 +186,10 @@ function create_test_database(db_dir::String)
         end
     end
 
-    # D genes
+    # D genes: synthetic sequences
     d_records = [
-        ("X97051|IGHD1-1*01|Homo sapiens|F|D-REGION|8..30|23 nt|1| | | | | | |", "ggtataactggaactgactacggg"),
-        ("X13972|IGHD2-2*01|Homo sapiens|F|D-REGION|8..25|18 nt|1| | | | | | |", "aggatattgtagtagtaccagctgctatgcc"),
+        ("SYN101|IGHD1-1*01|Synthetic|F|D-REGION|1..23|23 nt|1| | | | | | |", "ggtataactggaactaactacggg"),
+        ("SYN102|IGHD2-2*01|Synthetic|F|D-REGION|1..31|31 nt|1| | | | | | |", "aggatattgtagaagtaccagctgctatgcc"),
     ]
 
     open(joinpath(db_dir, "D.fasta"), "w") do io
@@ -199,12 +199,12 @@ function create_test_database(db_dir::String)
         end
     end
 
-    # J genes
+    # J genes: synthetic sequences with conserved Trp-Gly anchor motif
     j_records = [
-        ("J00256|IGHJ1*01|Homo sapiens|F|J-REGION|9..53|45 nt|1| | | | | | |", "gctgaatacttccagcactggggccagggcaccctggtcaccgtctcctcag"),
-        ("J00256|IGHJ2*01|Homo sapiens|F|J-REGION|118..170|53 nt|1| | | | | | |", "ctactggtacttcgatctctggggccgtggcaccctggtcactgtctcctcag"),
-        ("J00256|IGHJ3*01|Homo sapiens|F|J-REGION|229..279|51 nt|1| | | | | | |", "tgatgcttttgatgtctggggccaagggacaatggtcaccgtctcttcag"),
-        ("J00256|IGHJ4*01|Homo sapiens|F|J-REGION|346..393|48 nt|1| | | | | | |", "actactttgactactggggccaaggaaccctggtcaccgtctcctcag"),
+        ("SYN201|IGHJ1*01|Synthetic|F|J-REGION|1..50|50 nt|1| | | | | | |", "gctgaatacttccaacactggggccagggcaccctggtcaccgtctcctcag"),
+        ("SYN202|IGHJ2*01|Synthetic|F|J-REGION|1..51|51 nt|1| | | | | | |", "ctactggtacttcgaactctggggccgtggcaccctggtcactgtctcctcag"),
+        ("SYN203|IGHJ3*02|Synthetic|F|J-REGION|1..49|49 nt|1| | | | | | |", "tgatgcttttgaagtctggggccaagggacaatggtcaccgtctcttcag"),
+        ("SYN204|IGHJ4*02|Synthetic|F|J-REGION|1..47|47 nt|1| | | | | | |", "actactttgaatactggggccaaggaaccctggtcaccgtctcctcag"),
     ]
 
     open(joinpath(db_dir, "J.fasta"), "w") do io

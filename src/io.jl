@@ -130,7 +130,7 @@ end
 
 Extract allele identifier from IMGT-style header.
 Examples:
-  "J00256|IGHJ1*01|Homo sapiens|F|..."  → "IGHJ1*01"
+  "SYN001|IGHJ1*01|Synthetic|F|..."  → "IGHJ1*01"
   "IGHV1-18*01"                          → "IGHV1-18*01"
 """
 allele_name_from_header(name::AbstractString) =

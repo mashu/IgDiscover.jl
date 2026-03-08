@@ -221,6 +221,60 @@ function step_clonotypes(filtered_path::String, output_path::String)
     end
 end
 
+function step_exact_table(filtered_path::String, output_path::String)
+    cached(output_path) do
+        isfile(filtered_path) || return
+        table = read_assignments(filtered_path)
+        nrow(table) == 0 && (write_table(output_path, table); return)
+        hasproperty(table, :V_errors) || (write_table(output_path, table); return)
+        exact = table[coalesce.(table.V_errors, -1) .== 0, :]
+        write_table(output_path, exact)
+        @info "Exact table: $(nrow(exact)) rows with V_errors == 0"
+    end
+end
+
+function step_expression_counts(filtered_path::String, iter_dir::String)
+    isfile(filtered_path) || return
+    for gene in (:V, :D, :J)
+        output = joinpath(iter_dir, "expressed_$(gene).tab")
+        isfile(output) && continue
+        table = read_assignments(filtered_path)
+        nrow(table) == 0 && continue
+        counter = ExpressionCounter(gene=gene, allele_ratio=0.2)
+        counts = counter(table)
+        open(output, "w") do io
+            println(io, "gene\tcount")
+            for i in 1:nrow(counts)
+                println(io, counts.gene[i], '\t', counts.count[i])
+            end
+        end
+        @info "Expression counts: $(nrow(counts)) $(gene) genes"
+    end
+end
+
+function step_clusterplots(config::Config, filtered_path::String, iter_dir::String)
+    done_marker = joinpath(iter_dir, "clusterplots", "done")
+    isfile(done_marker) && return
+    isfile(filtered_path) || return
+
+    table = read_assignments(filtered_path)
+    nrow(table) == 0 && return
+
+    plots_dir = joinpath(iter_dir, "clusterplots")
+    mkpath(plots_dir)
+
+    plotter = ClusterPlotter(ignore_j=config.ignore_j)
+    results = plotter(table)
+    for r in results
+        open(joinpath(plots_dir, "$(r.gene).tsv"), "w") do io
+            println(io, "gene\tn_sequences\tn_clusters")
+            println(io, "$(r.gene)\t$(r.n_sequences)\t$(r.n_clusters)")
+        end
+    end
+    touch(done_marker)
+    @info "Clusterplots: processed $(length(results)) genes"
+end
+
 # ─── Iteration orchestration ───
 
 function run_iteration(config::Config, iter_dir::String, reads_path::String, iteration::Int)
@@ -238,11 +292,14 @@ function run_iteration(config::Config, iter_dir::String, reads_path::String, ite
     step_igblast(config, db_dir, reads_path, airr_path)
     step_augment(config, db_dir, airr_path, assigned_path)
     step_filter(config, assigned_path, filtered_path, stats_path)
+    step_exact_table(filtered_path, joinpath(iter_dir, "exact.tab"))
+    step_expression_counts(filtered_path, iter_dir)
     step_discover(config, db_dir, filtered_path, candidates_path)
     step_germline_filters(config, iter_dir)
     step_rename(config, iter_dir)
 
     iteration == 1 && step_j_discovery(config, db_dir, filtered_path, iter_dir)
+    step_clusterplots(config, filtered_path, iter_dir)
 end
 
 # ─── Final run ───
@@ -294,5 +351,8 @@ function run_final(config::Config, reads_path::String)
 
     @info "Final output in $final_dir/"
 
+    step_exact_table(filtered_path, joinpath(final_dir, "exact.tab"))
+    step_expression_counts(filtered_path, final_dir)
     step_clonotypes(filtered_path, joinpath(final_dir, "clonotypes.tsv"))
+    step_clusterplots(config, filtered_path, final_dir)
 end

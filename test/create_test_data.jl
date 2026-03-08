@@ -4,6 +4,11 @@
 # Creates V/D/J FASTA files in BLAST-compatible form (allele names, no IMGT dots)
 # and generates synthetic reads that resemble immunoglobulin sequences.
 #
+# IMPORTANT: All sequences below are PURELY SYNTHETIC and generated randomly.
+# They are NOT derived from IMGT, GenBank, or any other proprietary database.
+# The IMGT-style headers use fake accession numbers (SYN*) solely to exercise
+# the header-parsing and sanitization code paths.
+#
 # Usage:
 #   julia --project=. test/create_test_data.jl <reads_output> <database_dir> <n_reads>
 #
@@ -15,53 +20,62 @@ Pkg.activate(joinpath(@__DIR__, ".."))
 using Random
 using CodecZlib
 
-# ─── IMGT-style V gene sequences (realistic human IGHV, with dots) ───
+# ─── Synthetic V gene sequences ───
+#
+# ~296 nt each, with IMGT-style dot gaps and headers using fake accessions.
+# Each ends with a conserved Cys codon anchor (TGT/TGC) for CDR3 detection.
 
 const V_GENES = [
-    ("M99641|IGHV1-18*01|Homo sapiens|F|V-REGION|188..483|296 nt|1| | | | |296+24=320| | |",
-     "cagg.ttcagctggtgcag...tctggagct...gaggtg...aagaagcctggggcctcagtgaaggtctcctgcaaggcttctggttacaccttt...............accagctatggt...atcagctgggtgcgacaggcccctggacaagggcttgagtggatgggatggatcagcgcttac......aatggtaacacaaactatgcacagaagctccag...ggcagagtcaccatgaccacagacacatccacgagcacagcctacatggagctgaggagcctgagatctgacgacacggccgtgtattactgtgcgagaga"),
-    ("M99641|IGHV1-18*04|Homo sapiens|F|V-REGION|188..483|296 nt|1| | | | |296+24=320| | |",
-     "cagg.ttcagctggtgcag...tctggagct...gaggtg...aagaagcctggggcctcagtgaaggtctcctgcaaggcttctggttacaccttt...............accagctatggt...atcagctgggtgcgacaggcccctggacaagggcttgagtggatgggatggatcagcgcttac......aatggtaacacaaactatgcacagaagctccag...ggcagagtcaccatgaccacagacacatccacgagcacagcctacatggagctgaggagcctgagatctgacgacacggccgtgtattactgtgcgagagg"),
-    ("X62106|IGHV1-2*01|Homo sapiens|F|V-REGION|293..588|296 nt|1| | | | |296+24=320| | |",
-     "cagg.tgcagctggtgcag...tctggggct...gaggtg...aagaagcctggggcctcagtgaaggtctcctgcaaggcttctggatacaccttc...............accggctactatatg...cactgggtgcgacaggcccctggacaagggcttgagtggatgggatggatcaaccctaac......agtggtggcacaaactatgcacagaagtttcag...ggcagggtcaccatgaccagggacacgtccatcagcacagcctacatggagctgagcaggctgagatctgacgacacggccgtgtattactgtgcgagaga"),
-    ("AB019438|IGHV1-2*04|Homo sapiens|F|V-REGION|1..296|296 nt|1| | | | |296+24=320| | |",
-     "cagg.tgcagctggtgcag...tctggggct...gaggtg...aagaagcctggggcctcagtgaaggtctcctgcaaggcttctggatacaccttc...............accggctactatgtg...cactgggtgcgacaggcccctggacaagggcttgagtggatgggatggatcaaccctaac......agtggtggcacaaactatgcacagaagtttcag...ggcagggtcaccatgaccagggacacgtccatcagcacagcctacatggagctgagcaggctgagatctgacgacacggccgtgtattactgtgcgagaga"),
-    ("M99649|IGHV3-23*01|Homo sapiens|F|V-REGION|1..296|296 nt|1| | | | |296+24=320| | |",
-     "gag.gtgcagctggtggag...tctggggga...ggcttg...gtacagcctggggggtccctgagactctcctgtgcagcctctggattcaccttc.........agtaacagtgacatg...aactgggtccgccaggctccagggaaggggctggagtgggtctcatcc......attagtagtagtact......agttacatatactacgcagactcagtgaag...ggccgattcaccatctccagagacaacgccaagaactcactgtatctgcaaatgaacagcctgagagccgaggacacggccgtgtattactgtgcgaaaga"),
-    ("M99649|IGHV3-23*04|Homo sapiens|F|V-REGION|1..296|296 nt|1| | | | |296+24=320| | |",
-     "gag.gtgcagctggtggag...tctggggga...ggcttg...gtacagcctggggggtccctgagactctcctgtgcagcctctggattcaccttc.........agtaacagtgacatg...aactgggtccgccaggctccagggaaggggctggagtgggtctcatcc......attagtagtagtact......agttacatatactacgcagactcagtgaag...ggccgattcaccatctccagagacaacgccaagaactcactgtatctgcaaatgaacagcctgagagccgaggacacggccgtgtattactgtgcgaaagc"),
-    ("AB019439|IGHV3-30*01|Homo sapiens|F|V-REGION|1..296|296 nt|1| | | | |296+24=320| | |",
-     "cag.gtgcagctggtggag...tctggggga...ggcgtg...gtccagcctgggaggtccctgagactctcctgtgcagcgtctggattcaccttc.........agtagctatggcatg...cactgggtccgccaggctccaggcaaggggctggagtgggtggcagtt......atatggtatgatgga......agtaataaatactatgcagactccgtgaag...ggccgattcaccatctccagagacaattccaagaacacgctgtatctgcaaatgaacagcctgagagccgaggacacggctgtgtattactgtgcgagaga"),
-    ("X92218|IGHV4-34*01|Homo sapiens|F|V-REGION|1..296|296 nt|1| | | | |296+24=320| | |",
-     "cag.gtgcagctacagcag...tggggcgca...ggactg...ttgaagccttcggagaccctgtccctcacctgcgctgtctatggtgggtccttc.........agtggttactactgg...agctggatccgccagcccccagggaaggggctggagtggattggggaa......atcaatcatagtgga......agcaccaactacaacccgtccctcaagagt...cgagtcaccatatcagtagacacgtccaagaaccagttctccctgaagctgagctctgtgaccgccgcggacacggccgtgtattactgtgcgagaga"),
+    ("SYN001|IGHV1-18*01|Synthetic|F|V-REGION|1..296|296 nt|1| | | | |296+24=320| | |",
+     "cagg.ttcagctggtgcag...tctggagct...gaggtg...aagaagcctggagcctcagtgaaggtctcctgcaaggcttctggttacaccttt...............accagctatggt...atcagctgggtgcgacaggcccctggacaagggcttgagtggatgggatggatcagcgcatac......aatggtaacaccaactatgcacagaaactccag...ggcagagtcaccatgaccacagacatatccacgagcacagcctacatggagctaaggagcctgagatctgacgacacggccgtgtattactgtgcgagaga"),
+    ("SYN002|IGHV1-18*04|Synthetic|F|V-REGION|1..296|296 nt|1| | | | |296+24=320| | |",
+     "cagg.ttcagctggtgcag...tctggagct...gaggtg...aagaagcctggagcctcagtgaaggtctcctgcaaggcttctggttacaccttt...............accagctatggt...atcagctgggtgcgacaggcccctggacaagggcttgagtggatgggatggatcagcgcatac......aatggtaacaccaactatgcacagaaactccag...ggcagagtcaccatgaccacagacatatccacgagcacagcctacatggagctaaggagcctgagatctgacgacacggccgtgtattactgtgcgagagg"),
+    ("SYN003|IGHV1-2*01|Synthetic|F|V-REGION|1..296|296 nt|1| | | | |296+24=320| | |",
+     "cagg.tgcagctggtgcag...tctggggct...gaggtg...aagaagcctggagcctcagtgaaggtctcctgcaaggcttctggatacaccttc...............accggctactatatg...cactgggtgcgacaggcccctggacaagggcttgagtggatgggatggatcaacccaaac......agtggtggcacaaactatgcacagaagattcag...ggcagggtcaccatgaccagggacacatccatcagcacagcctacatggagctaagcaggctgagatctgacgacacggccgtgtattactgtgcgagaga"),
+    ("SYN004|IGHV1-2*04|Synthetic|F|V-REGION|1..296|296 nt|1| | | | |296+24=320| | |",
+     "cagg.tgcagctggtgcag...tctggggct...gaggtg...aagaagcctggagcctcagtgaaggtctcctgcaaggcttctggatacaccttc...............accggctactatgtg...cactgggtgcgacaggcccctggacaagggcttgagtggatgggatggatcaacccaaac......agtggtggcacaaactatgcacagaagattcag...ggcagggtcaccatgaccagggacacatccatcagcacagcctacatggagctaagcaggctgagatctgacgacacggccgtgtattactgtgcgagaga"),
+    ("SYN005|IGHV3-23*01|Synthetic|F|V-REGION|1..296|296 nt|1| | | | |296+24=320| | |",
+     "gag.gtgcagctggtggag...tctggggga...ggcttg...gtacagcctggagggtccctgagactctcctgtgcagcctctggattcaccttc.........agtaacagtgacatg...aactgggtccgccaggctccagggaaggggctggagtgggtctcatcc......attagtaatagaact......agttacatatactacgcagactcagtaaag...ggccgattcaccatctccagagacaacgccaagaactcactgtttctgcaaatgaacagcctaagagccgaggacacggccgtgtattactgtgcgaaaga"),
+    ("SYN006|IGHV3-23*04|Synthetic|F|V-REGION|1..296|296 nt|1| | | | |296+24=320| | |",
+     "gag.gtgcagctggtggag...tctggggga...ggcttg...gtacagcctggagggtccctgagactctcctgtgcagcctctggattcaccttc.........agtaacagtgacatg...aactgggtccgccaggctccagggaaggggctggagtgggtctcatcc......attagtaatagaact......agttacatatactacgcagactcagtaaag...ggccgattcaccatctccagagacaacgccaagaactcactgtttctgcaaatgaacagcctaagagccgaggacacggccgtgtattactgtgcgaaagc"),
+    ("SYN007|IGHV3-30*01|Synthetic|F|V-REGION|1..296|296 nt|1| | | | |296+24=320| | |",
+     "cag.gtgcagctggtggag...tctggggga...ggcgtg...gtccagcctggaaggtccctgagactctcctgtgcagcgtctggattcaccttc.........agtagctatggcatg...cactgggtccgccaggctccaggcaaggggctggagtgggtggcaatt......atatggtatgataga......agtaataaatactatgcagactccgtaaag...ggccgattcaccatctccagagacaattccaagaacacactgtatctgcaaatgaacagcctaagagccgaggacacggctgtgtattactgtgcgagaga"),
+    ("SYN008|IGHV4-34*01|Synthetic|F|V-REGION|1..296|296 nt|1| | | | |296+24=320| | |",
+     "cag.gtgcagctacagcag...tggggcgca...ggactg...ttgaagccttcggaaaccctgtccctcacctgcgctgtctatggtgggtccttc.........agtggttactactgg...agctggatccgccagcccccagggaaggggctggaatggattggggaa......atcaatcatagagga......agcaccaactacaacccgtccctcaagaat...cgagtcaccatatcagtagacacatccaagaaccagttctccctaaagctaagctctgtgaccgccgcggacacggccgtgtattactgtgcgagaga"),
 ]
+
+# ─── Synthetic D gene sequences ───
 
 const D_GENES = [
-    ("X97051|IGHD1-1*01|Homo sapiens|F|D-REGION|8..30|23 nt|1| | | | | | |",
-     "ggtataactggaactgactacggg"),
-    ("X13972|IGHD2-2*01|Homo sapiens|F|D-REGION|8..25|18 nt|1| | | | | | |",
-     "aggatattgtagtagtaccagctgctatgcc"),
-    ("X97051|IGHD3-10*01|Homo sapiens|F|D-REGION|8..22|15 nt|1| | | | | | |",
-     "gtattactatggttcggggagttattataac"),
-    ("X97051|IGHD4-17*01|Homo sapiens|F|D-REGION|8..22|15 nt|1| | | | | | |",
-     "tgactacggtgactac"),
-    ("X97051|IGHD6-19*01|Homo sapiens|F|D-REGION|8..24|17 nt|1| | | | | | |",
-     "gggtatagcagcggctggtac"),
+    ("SYN101|IGHD1-1*01|Synthetic|F|D-REGION|1..23|23 nt|1| | | | | | |",
+     "ggtataactggaactaactacggg"),
+    ("SYN102|IGHD2-2*01|Synthetic|F|D-REGION|1..31|31 nt|1| | | | | | |",
+     "aggatattgtagaagtaccagctgctatgcc"),
+    ("SYN103|IGHD3-10*01|Synthetic|F|D-REGION|1..30|30 nt|1| | | | | | |",
+     "gtattactatggaacggggagttattataac"),
+    ("SYN104|IGHD4-17*01|Synthetic|F|D-REGION|1..16|16 nt|1| | | | | | |",
+     "tgactacgatgactac"),
+    ("SYN105|IGHD6-19*01|Synthetic|F|D-REGION|1..21|21 nt|1| | | | | | |",
+     "gggtatagcaacggctggtac"),
 ]
 
+# ─── Synthetic J gene sequences ───
+#
+# Each starts with a conserved Trp-Gly anchor (TGGGGC / TGGGGA) for CDR3 detection.
+
 const J_GENES = [
-    ("J00256|IGHJ1*01|Homo sapiens|F|J-REGION|9..53|45 nt|1| | | | | | |",
-     "gctgaatacttccagcactggggccagggcaccctggtcaccgtctcctcag"),
-    ("J00256|IGHJ2*01|Homo sapiens|F|J-REGION|118..170|53 nt|1| | | | | | |",
-     "ctactggtacttcgatctctggggccgtggcaccctggtcactgtctcctcag"),
-    ("J00256|IGHJ3*02|Homo sapiens|F|J-REGION|229..279|51 nt|1| | | | | | |",
-     "tgatgcttttgatgtctggggccaagggacaatggtcaccgtctcttcag"),
-    ("J00256|IGHJ4*02|Homo sapiens|F|J-REGION|346..393|48 nt|1| | | | | | |",
-     "actactttgactactggggccaaggaaccctggtcaccgtctcctcag"),
-    ("J00256|IGHJ5*02|Homo sapiens|F|J-REGION|459..507|49 nt|1| | | | | | |",
-     "acaactggttcgacccctggggccagggaaccctggtcaccgtctcctcag"),
-    ("J00256|IGHJ6*02|Homo sapiens|F|J-REGION|572..625|54 nt|1| | | | | | |",
-     "attactactactactacggtatggacgtctgggggcaagggaccacggtcaccgtctcctcag"),
+    ("SYN201|IGHJ1*01|Synthetic|F|J-REGION|1..50|50 nt|1| | | | | | |",
+     "gctgaatacttccaacactggggccagggcaccctggtcaccgtctcctcag"),
+    ("SYN202|IGHJ2*01|Synthetic|F|J-REGION|1..51|51 nt|1| | | | | | |",
+     "ctactggtacttcgaactctggggccgtggcaccctggtcactgtctcctcag"),
+    ("SYN203|IGHJ3*02|Synthetic|F|J-REGION|1..49|49 nt|1| | | | | | |",
+     "tgatgcttttgaagtctggggccaagggacaatggtcaccgtctcttcag"),
+    ("SYN204|IGHJ4*02|Synthetic|F|J-REGION|1..47|47 nt|1| | | | | | |",
+     "actactttgaatactggggccaaggaaccctggtcaccgtctcctcag"),
+    ("SYN205|IGHJ5*02|Synthetic|F|J-REGION|1..50|50 nt|1| | | | | | |",
+     "acaactggttcaacccctggggccagggaaccctggtcaccgtctcctcag"),
+    ("SYN206|IGHJ6*02|Synthetic|F|J-REGION|1..61|61 nt|1| | | | | | |",
+     "attactactactaatacggtatggacgtctgggggcaagggaccacggtcaccgtctcctcag"),
 ]
 
 # ─── Helpers ───
@@ -69,7 +83,7 @@ const J_GENES = [
 """Remove IMGT dots from a sequence."""
 clean_seq(s::AbstractString) = uppercase(replace(s, "." => ""))
 
-"""Extract allele name from IMGT pipe-delimited header (e.g. IGHV1-18*01) for BLAST-safe FASTA."""
+"""Extract allele name from pipe-delimited header (e.g. IGHV1-18*01)."""
 allele_from_header(h::AbstractString) = (p = split(h, '|'); length(p) >= 2 ? String(p[2]) : String(h))
 
 """Introduce random point mutations at a given rate."""
@@ -84,8 +98,8 @@ function mutate(seq::String, rate::Float64; rng=Random.default_rng())
     String(chars)
 end
 
-"""Generate a random CDR3 of given nucleotide length (must be divisible by 3)."""
-function random_cdr3(len::Int; rng=Random.default_rng())
+"""Generate a random nucleotide string of given length."""
+function random_nt(len::Int; rng=Random.default_rng())
     bases = ['A', 'C', 'G', 'T']
     String([rand(rng, bases) for _ in 1:len])
 end
@@ -95,8 +109,7 @@ end
 function create_database(db_dir::String)
     mkpath(db_dir)
 
-    # Write BLAST-compatible FASTA: allele-only headers, no IMGT dots in sequence
-    # (makeblastdb rejects dots and pipe-heavy headers)
+    # Write BLAST-compatible FASTA: allele-only headers, no dots in sequence
     for (filename, genes) in [("V.fasta", V_GENES), ("D.fasta", D_GENES), ("J.fasta", J_GENES)]
         open(joinpath(db_dir, filename), "w") do io
             for (header, seq) in genes
@@ -105,7 +118,7 @@ function create_database(db_dir::String)
             end
         end
     end
-    @info "Created BLAST-compatible database at $db_dir with $(length(V_GENES)) V, $(length(D_GENES)) D, $(length(J_GENES)) J genes"
+    @info "Created database at $db_dir with $(length(V_GENES)) V, $(length(D_GENES)) D, $(length(J_GENES)) J genes"
 end
 
 # ─── Synthetic read generation ───
@@ -113,13 +126,11 @@ end
 function generate_reads(output_path::String, n_reads::Int; seed::Int=42)
     rng = Random.MersenneTwister(seed)
 
-    # Clean sequences for read generation
     v_seqs = [(clean_seq(s), h) for (h, s) in V_GENES]
     d_seqs = [clean_seq(s) for (_, s) in D_GENES]
     j_seqs = [clean_seq(s) for (_, s) in J_GENES]
 
     open(output_path, "w") do io
-        # Use GzipCompressorStream if output is .gz
         stream = if endswith(output_path, ".gz")
             GzipCompressorStream(io)
         else
@@ -127,7 +138,6 @@ function generate_reads(output_path::String, n_reads::Int; seed::Int=42)
         end
 
         for i in 1:n_reads
-            # Pick random V, D, J
             v_seq, _ = rand(rng, v_seqs)
             d_seq = rand(rng, d_seqs)
             j_seq = rand(rng, j_seqs)
@@ -135,12 +145,11 @@ function generate_reads(output_path::String, n_reads::Int; seed::Int=42)
             # SHM rate: mostly 0-2% for exact matches, some higher
             shm_rate = rand(rng) < 0.6 ? 0.0 : rand(rng) * 0.05
 
-            # Mutate V region
             v_mut = mutate(v_seq, shm_rate; rng=rng)
 
             # Random N-nucleotide junctions
-            n1 = random_cdr3(rand(rng, 0:6); rng=rng)
-            n2 = random_cdr3(rand(rng, 0:6); rng=rng)
+            n1 = random_nt(rand(rng, 0:6); rng=rng)
+            n2 = random_nt(rand(rng, 0:6); rng=rng)
 
             # D region (sometimes trimmed)
             d_trim_5 = rand(rng, 0:min(5, length(d_seq) ÷ 3))

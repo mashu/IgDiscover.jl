@@ -86,7 +86,7 @@ IgDiscover.parse_header("read1;size=5;barcode=ACG;")
 # ── IMGT sanitization ──
 
 IgDiscover.sanitize_imgt_sequence("ATG...CCC.GGG")
-IgDiscover.allele_name_from_header("M99641|IGHV1-18*01|Homo")
+IgDiscover.allele_name_from_header("SYN001|IGHV1-18*01|Synthetic")
 
 # ── Table operations ──
 

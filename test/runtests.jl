@@ -107,8 +107,8 @@ using DataFrames
     end
 
     @testset "IMGT sanitization" begin
-        @test IgDiscover.allele_name_from_header("J00256|IGHJ1*01|Homo sapiens|F|") == "IGHJ1*01"
-        @test IgDiscover.allele_name_from_header("M99641|IGHV1-18*01|Homo sapiens|F|V-REGION|") == "IGHV1-18*01"
+        @test IgDiscover.allele_name_from_header("SYN201|IGHJ1*01|Synthetic|F|") == "IGHJ1*01"
+        @test IgDiscover.allele_name_from_header("SYN001|IGHV1-18*01|Synthetic|F|V-REGION|") == "IGHV1-18*01"
         @test IgDiscover.allele_name_from_header("IGHV1-18*01") == "IGHV1-18*01"
         @test IgDiscover.allele_name_from_header("simple") == "simple"
 
@@ -117,7 +117,7 @@ using DataFrames
         @test IgDiscover.sanitize_imgt_sequence("...") == ""
         @test IgDiscover.sanitize_imgt_sequence("atg..ccc") == "ATGCCC"
 
-        rec = IgDiscover.FastaRecord("M99641|IGHV1-18*01|Homo sapiens|F|", "atg...ccc.ggg")
+        rec = IgDiscover.FastaRecord("SYN001|IGHV1-18*01|Synthetic|F|", "atg...ccc.ggg")
         cleaned = IgDiscover.sanitize_imgt_record(rec)
         @test cleaned.name == "IGHV1-18*01"
         @test cleaned.sequence == "ATGCCCGGG"
@@ -127,9 +127,9 @@ using DataFrames
         out_path = joinpath(tmpdir, "clean.fasta")
 
         open(imgt_path, "w") do io
-            println(io, ">M99641|IGHV1-18*01|Homo sapiens|F|V-REGION|188..483|296 nt|1| | | | |296+24=320| | |")
+            println(io, ">SYN001|IGHV1-18*01|Synthetic|F|V-REGION|1..296|296 nt|1| | | | |296+24=320| | |")
             println(io, "cagg...ttcagctggtgcag...tctggagct...gaggtg...aagaagcctggggcc")
-            println(io, ">X62106|IGHV1-18*04|Homo sapiens|F|V-REGION|188..483|296 nt|1| | | | |296+24=320| | |")
+            println(io, ">SYN002|IGHV1-18*04|Synthetic|F|V-REGION|1..296|296 nt|1| | | | |296+24=320| | |")
             println(io, "cagg.ttcagctggtgcag.tctggagct")
         end
 

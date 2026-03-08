@@ -1,6 +1,6 @@
 # IgDiscover.jl
 
-A reimplementation in Julia of [IgDiscover](https://gitlab.com/gkhlab/igdiscover22), with further development, for individualized V gene database construction from high-throughput sequencing data.
+A reimplementation in Julia of [IgDiscover](https://gitlab.com/gkhlab/igdiscover22) for individualized V gene database construction from high-throughput sequencing data.
 
 ## Overview
 
@@ -26,7 +26,7 @@ run_pipeline("my_analysis")
 - **Pipeline** — File layout and iteration flow.
 - **[Output formats](@ref)** — All output files and column definitions (TSV/JSON), with meanings and formulas.
 - **[Configuration](@ref)** — TOML options and defaults.
-- **Modules** — API by component (IgBLAST, grouping, augment, DNA, I/O, CDR3, alignment, clustering, discovery, J discovery, germline filter, clonotypes).
+- **Modules** — API by component (IgBLAST, grouping, augment, DNA, I/O, CDR3, alignment, clustering, discovery, J discovery, germline filter, clonotypes, clonoquery, allele usage, upstream, expression counts, database comparison, haplotype, clusterplot, dereplicate, merge, union).
 - **[API Reference](@ref)** — Exported functions and types.
 
 ## Features
@@ -35,6 +35,16 @@ run_pipeline("my_analysis")
 - **J gene discovery** — identifies novel J alleles
 - **Preprocessing** — AIRR-format augmentation, filtering, IMGT database sanitization
 - **Clonotype calling** — V+J+CDR3 single-linkage clustering
+- **Clonoquery** — query a reference table by clonotype similarity
+- **Expression counting** — per-gene expression with allele ratio filtering
+- **Allele co-expression** — matrix computation for co-expression analysis
+- **Haplotype phasing** — from allele co-occurrence patterns
+- **Upstream analysis** — UTR/leader consensus per V gene
+- **Database comparison** — diff two FASTA gene databases
+- **Cluster visualization** — per-gene distance heatmaps
+- **Dereplication** — sequence deduplication with barcode removal
+- **Read merging** — paired-end read merging (PEAR/FLASH wrapper)
+- **Sequence union** — merge FASTA files with prefix deduplication
 - **PCR bias correction** — barcode-based grouping with consensus
 - **Configurable** — TOML-based configuration with sensible defaults
 - **Fast** — threaded IgBLAST execution, pre-allocated edit distance buffers, PrecompileTools integration

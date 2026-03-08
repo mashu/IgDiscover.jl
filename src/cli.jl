@@ -3,7 +3,7 @@
 function argparse_settings()
     s = ArgParse.ArgParseSettings(
         "IgDiscover.jl — antibody repertoire analysis and V gene discovery",
-        version = "IgDiscover.jl 0.2.0",
+        version = "IgDiscover.jl 0.3.0",
         add_version = false,
     )
     s.commands_are_required = false
@@ -43,6 +43,15 @@ function argparse_settings()
         "clusterplot"
             action = :command
             help = "Cluster sequences per gene and show distance heatmap"
+        "dereplicate"
+            action = :command
+            help = "Deduplicate sequences and remove barcodes"
+        "merge"
+            action = :command
+            help = "Merge paired-end reads (PEAR wrapper)"
+        "union"
+            action = :command
+            help = "Compute union of sequences in multiple FASTA files"
         "version"
             action = :command
             help = "Show version"
@@ -272,6 +281,54 @@ function argparse_settings()
             required = true
     end
 
+    @ArgParse.add_arg_table! s["dereplicate"] begin
+        "--limit"
+            help = "Process only first N reads"
+            arg_type = Int
+            default = 0
+        "--trim-g"
+            help = "Trim leading G nucleotides (RACE artifact)"
+            action = :store_true
+        "--minimum-length"
+            help = "Minimum sequence length"
+            arg_type = Int
+            default = 0
+        "--barcode-length"
+            help = "Barcode length (positive=5', negative=3')"
+            arg_type = Int
+            default = 0
+        "--json"
+            help = "Write statistics to JSON file"
+            arg_type = String
+            default = ""
+        "fastx"
+            help = "Input FASTA/FASTQ file"
+            required = true
+    end
+
+    @ArgParse.add_arg_table! s["merge"] begin
+        "--threads"
+            help = "Number of threads"
+            arg_type = Int
+            default = 0
+        "reads1"
+            help = "Forward reads FASTQ file"
+            required = true
+        "reads2"
+            help = "Reverse reads FASTQ file"
+            required = true
+        "output"
+            help = "Output merged FASTQ.gz"
+            required = true
+    end
+
+    @ArgParse.add_arg_table! s["union"] begin
+        "fasta"
+            help = "FASTA files to merge"
+            nargs = '+'
+            required = true
+    end
+
     return s
 end
 
@@ -290,7 +347,7 @@ handle_command(::Val{:run}, parsed) = begin
     run_pipeline(dir)
 end
 
-handle_command(::Val{:version}, _) = println("IgDiscover.jl 0.2.0")
+handle_command(::Val{:version}, _) = println("IgDiscover.jl 0.3.0")
 
 handle_command(::Val{:clonotypes}, parsed) = begin
     a = parsed["clonotypes"]
@@ -403,6 +460,38 @@ handle_command(::Val{:clusterplot}, parsed) = begin
         println(render_heatmap(r))
     end
     @info "Processed $(length(results)) genes"
+end
+
+handle_command(::Val{:dereplicate}, parsed) = begin
+    a = parsed["dereplicate"]
+    derep = Dereplicator(DereplicateParams(
+        barcode_length=a["barcode-length"], trim_g=a["trim-g"],
+        minimum_length=a["minimum-length"], limit=a["limit"]))
+    records, stats = derep(a["fastx"])
+    write_dereplicated(stdout, records, a["barcode-length"] != 0)
+    @info "$(stats.total_reads) reads → $(stats.unique_sequences) unique ($(stats.too_short) too short)"
+    json_path = a["json"]
+    if !isempty(json_path)
+        open(json_path, "w") do io
+            JSON3.pretty(io, Dict("groups_written" => stats.unique_sequences))
+            println(io)
+        end
+    end
+end
+
+handle_command(::Val{:merge}, parsed) = begin
+    a = parsed["merge"]
+    merger = ReadMerger(program=:pear, threads=a["threads"])
+    stats = merger(a["reads1"], a["reads2"], a["output"])
+    @info "Merged $(stats.merged) of $(stats.total) read pairs"
+end
+
+handle_command(::Val{:union}, parsed) = begin
+    a = parsed["union"]
+    merged = SequenceUnion()(a["fasta"])
+    for rec in merged
+        println(">$(rec.name)\n$(rec.sequence)")
+    end
 end
 
 # ─── Entry point ───

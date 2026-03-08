@@ -40,6 +40,9 @@ include("count.jl")
 include("dbdiff.jl")
 include("haplotype.jl")
 include("clusterplot.jl")
+include("dereplicate.jl")
+include("merge.jl")
+include("union.jl")
 include("pipeline.jl")
 include("cli.jl")
 
@@ -87,6 +90,16 @@ export format_tsv, switch_haplotype!, sort_haplotype!
 
 # ── Cluster visualization ──
 export ClusterPlotter, ClusterResult, render_heatmap
+
+# ── Dereplicate ──
+export Dereplicator, DereplicateParams, DereplicatedRecord, DereplicateStats
+export write_dereplicated
+
+# ── Read merging ──
+export ReadMerger, MergeStats
+
+# ── Sequence union ──
+export SequenceUnion
 
 # ── Shared dispatch ──
 export apply_filters, filter_by_allele_ratio
@@ -141,7 +154,7 @@ export apply_filters, filter_by_allele_ratio
         cdr3_end_in_j("TGGGCAGGG", "IGH")
         align_affine("ATCG", "ATCA")
         sanitize_imgt_sequence("ATG...CCC")
-        allele_name_from_header("X|IGHV1*01|Homo")
+        allele_name_from_header("SYN001|IGHV1*01|Synthetic")
 
         is_similar_with_junction("ATCGATCG", "ATCGATCA", 1.0, nothing)
         is_similar_with_junction("ATCGATCG", "ATCGATCA", 1.0, CDR3CoreSlice(2, 6))
@@ -149,6 +162,12 @@ export apply_filters, filter_by_allele_ratio
 
         cmp = DatabaseComparator()
         cmp(recs[1:2], recs[1:2])
+
+        split_barcode("AAAAATCGATCG", 5)
+        split_barcode("ATCGATCGAAAAA", -5)
+
+        su = SequenceUnion()
+        try_merge(NamedSequence("a", "ATCG"), NamedSequence("b", "ATCGATCG"))
     end
     rm(tmpdir; recursive=true, force=true)
 end
