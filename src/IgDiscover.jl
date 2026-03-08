@@ -10,6 +10,7 @@ using FASTX
 using JSON3
 using PrecompileTools
 using Printf
+using ProgressMeter
 using Random
 using SHA
 using ArgParse

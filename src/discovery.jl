@@ -331,11 +331,13 @@ function discover_germline(
     all_candidates = Candidate[]
     namer = NameGenerator()
 
-    for gdf in groupby(table, :v_call)
-        gene = String(first(gdf.v_call))
-        isempty(gene) && continue
-        nrow(gdf) < MINGROUPSIZE && continue
-        for c in discover_gene(gene, DataFrame(gdf), params)
+    gene_groups = [(String(first(gdf.v_call)), DataFrame(gdf)) for gdf in groupby(table, :v_call)
+                   if !isempty(String(first(gdf.v_call))) && nrow(gdf) >= MINGROUPSIZE]
+    n_genes = length(gene_groups)
+    prog = Progress(n_genes; dt = 1, desc = "Aligning V genes: ", barlen = 40)
+    for (gene, gdf) in gene_groups
+        next!(prog; showvalues = [(:gene, gene)])
+        for c in discover_gene(gene, gdf, params)
             named = Candidate(
                 namer(c.name), c.source, c.chain, c.cluster,
                 c.cluster_size, c.Js, c.CDR3s, c.exact, c.full_exact, c.barcodes_exact,

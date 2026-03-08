@@ -95,8 +95,10 @@ function (analyzer::UpstreamAnalyzer)(table::DataFrame)
 
     records = FastaRecord[]
     n_ambiguous = 0
-
-    for gene in sort(unique(filter(!isempty, v_calls)))
+    genes = sort(unique(filter(!isempty, v_calls)))
+    prog = Progress(length(genes); dt = 1, desc = "Upstream consensus: ", barlen = 40)
+    for gene in genes
+        next!(prog; showvalues = [(:gene, gene)])
         mask = v_calls .== gene
         gene_targets = target_col[mask]
         gene_utrs = hasproperty(df, :UTR) ? String.(coalesce.(df[mask, :UTR], "")) : gene_targets

@@ -202,8 +202,10 @@ function group_reads(
 
     counter = ConsensusCounter()
     out_records = FastaRecord[]
-
-    for barcode in sort!(collect(keys(barcode_groups)))
+    sorted_barcodes = sort!(collect(keys(barcode_groups)))
+    prog = Progress(length(sorted_barcodes); dt = 1, desc = "Group consensus: ", barlen = 40)
+    for barcode in sorted_barcodes
+        next!(prog; showvalues = [(:barcode, barcode)])
         seqs = barcode_groups[barcode]
 
         clusters = if !group_by_cdr3

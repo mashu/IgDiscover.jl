@@ -1,7 +1,8 @@
 # Multiple sequence alignment and consensus computation
 #
 # Aligners are extensible via the Aligner abstract type: define a struct <: Aligner,
-# implement run_align(::YourAligner, fasta_str, threads), and register in ALIGNERS.
+# implement run_align(::YourAligner, fasta_str, threads), and register via
+# aligner_for_program().
 
 abstract type Aligner end
 
@@ -18,60 +19,119 @@ function run_align(::ClustaloAligner, fasta_str::String, threads::Int)
     read(pipeline(IOBuffer(fasta_str), `clustalo --threads=$threads --infile=-`), String)
 end
 
-struct MuscleAligner <: Aligner
-    variant::String  # "muscle", "muscle-fast", "muscle-medium"
+# ─── MUSCLE: v3 vs v5 via MuscleVersion dispatch ───
+#
+# MUSCLE v3 (bioconda default): stdin/stdout, -maxiters, -diags
+#   muscle -quiet -maxiters 1 -diags -in /dev/stdin -out /dev/stdout
+#
+# MUSCLE v5 (separate install):  file-based, -super5 or -align + -refineiters
+#   muscle -super5 in.fa -output out.afa -threads N
+#
+# The two versions have completely incompatible CLIs.
+
+abstract type MuscleVersion end
+struct MuscleV3 <: MuscleVersion end
+struct MuscleV5 <: MuscleVersion end
+
+struct MuscleAligner{V <: MuscleVersion} <: Aligner
+    variant::String   # "muscle", "muscle-fast", "muscle-medium"
 end
-# MUSCLE5 -refineiters: fewer = faster, less accurate. -threads uses internal parallelism.
-function _muscle_refineiters(variant::String)
-    variant == "muscle-fast" && return 1
-    variant == "muscle-medium" && return 10
-    return 100  # "muscle" or default
+
+# Version detection: run once, cache result
+
+const DETECTED_MUSCLE_VERSION = Ref{Union{Nothing, MuscleVersion}}(nothing)
+
+function detect_muscle_version()
+    DETECTED_MUSCLE_VERSION[] !== nothing && return DETECTED_MUSCLE_VERSION[]
+    # v3: "MUSCLE v3.8.31 by Robert C. Edgar"
+    # v5: "muscle 5.1.xxx" or "muscle 5.2"
+    output = read(pipeline(`muscle -version`, stderr=devnull), String)
+    version = occursin(r"muscle\s+5\.", output) ? MuscleV5() : MuscleV3()
+    DETECTED_MUSCLE_VERSION[] = version
+    @info "Detected MUSCLE $(version isa MuscleV5 ? "v5" : "v3")"
+    version
 end
-function run_align(a::MuscleAligner, fasta_str::String, threads::Int)
+
+function make_muscle_aligner(variant::String)
+    v = detect_muscle_version()
+    MuscleAligner{typeof(v)}(variant)
+end
+
+# ─── MUSCLE v3: pipe-based, -maxiters, -diags (matches Python exactly) ───
+
+function run_align(a::MuscleAligner{MuscleV3}, fasta_str::String, ::Int)
+    cmd = if a.variant == "muscle-fast"
+        # Python: ["muscle", "-quiet", "-maxiters", "1", "-diags", "-in", "-", "-out", "-"]
+        `muscle -quiet -maxiters 1 -diags -in /dev/stdin -out /dev/stdout`
+    elseif a.variant == "muscle-medium"
+        # Python: ["muscle", "-quiet", "-maxiters", "2", "-diags", "-in", "-", "-out", "-"]
+        `muscle -quiet -maxiters 2 -diags -in /dev/stdin -out /dev/stdout`
+    else
+        # Python: ["muscle", "-quiet", "-in", "-", "-out", "-"]
+        `muscle -quiet -in /dev/stdin -out /dev/stdout`
+    end
+    read(pipeline(IOBuffer(fasta_str), cmd), String)
+end
+
+# ─── MUSCLE v5: file-based, -super5 for fast, -align + -refineiters for others ───
+#
+# v5 has no -maxiters or -diags.
+# -super5 is the fast mode (HMM ensemble, closest to v3's -maxiters 1 -diags).
+# -align with -refineiters 0 gives progressive alignment only (no refinement).
+
+function run_align(a::MuscleAligner{MuscleV5}, fasta_str::String, threads::Int)
     tmpin = tempname() * ".fa"
     tmpout = tempname() * ".afa"
     write(tmpin, fasta_str)
-    ref = _muscle_refineiters(a.variant)
-    # MUSCLE5: -align, -refineiters N, -threads N
-    cmd = `muscle -align $tmpin -output $tmpout -refineiters $ref -threads $threads`
-    p = run(pipeline(cmd, stderr=devnull); wait=false)
-    wait(p)
-    result = if p.exitcode == 0 && isfile(tmpout) && filesize(tmpout) > 0
-        read(tmpout, String)
+
+    cmd = if a.variant == "muscle-fast"
+        # -super5: fastest v5 mode, HMM-based, no iterative refinement
+        `muscle -super5 $tmpin -output $tmpout -threads $threads`
+    elseif a.variant == "muscle-medium"
+        # Progressive alignment + 1 refinement pass
+        `muscle -align $tmpin -output $tmpout -refineiters 1 -threads $threads`
     else
-        rm(tmpout; force=true)
-        run(pipeline(`muscle -quiet -in $tmpin -out $tmpout -threads $threads`, stderr=devnull))
-        read(tmpout, String)
+        # Full: progressive + many refinement passes
+        `muscle -align $tmpin -output $tmpout -refineiters 100 -threads $threads`
     end
+
+    run(pipeline(cmd, stderr=devnull))
+    result = read(tmpout, String)
     rm(tmpin; force=true)
     rm(tmpout; force=true)
     result
 end
 
-const ALIGNERS = Dict{String, Aligner}(
-    "mafft" => MafftAligner(),
-    "clustalo" => ClustaloAligner(),
-    "muscle" => MuscleAligner("muscle"),
-    "muscle-fast" => MuscleAligner("muscle-fast"),
-    "muscle-medium" => MuscleAligner("muscle-medium"),
-)
+# ─── Aligner registry (lazy — version detection at first use) ───
 
-aligner_for_program(program::String) = get(ALIGNERS, program) do
-    error("Alignment program '$program' not supported. Registered: ", join(sort!(collect(keys(ALIGNERS))), ", "))
+const ALIGNERS = Dict{String, Aligner}()
+
+function aligner_for_program(program::String)
+    get!(ALIGNERS, program) do
+        if program in ("muscle", "muscle-fast", "muscle-medium")
+            make_muscle_aligner(program)
+        elseif program == "mafft"
+            MafftAligner()
+        elseif program == "clustalo"
+            ClustaloAligner()
+        else
+            error("Alignment program '$program' not supported. " *
+                  "Known: mafft, clustalo, muscle, muscle-fast, muscle-medium")
+        end
+    end
 end
 
 """
     parse_fasta_string(output) -> Dict{String,String}
 
-Parse a FASTA-format string into name → sequence dictionary. Delegates to read_fasta_dict_from_io.
+Parse a FASTA-format string into name → sequence dictionary.
 """
 parse_fasta_string(output::String) = read_fasta_dict_from_io(IOBuffer(output))
 
 """
-    multialign(sequences::Dict{String,String}; program="muscle-fast", threads=Sys.CPU_THREADS) -> Dict{String,String}
+    multialign(sequences; program="muscle-fast", threads=Sys.CPU_THREADS) -> Dict{String,String}
 
-Run a multiple sequence alignment program and return aligned sequences.
-Dispatch is via the `Aligner` abstraction; register new programs in `ALIGNERS` and implement `run_align`.
+Run a multiple sequence alignment. Dispatch is via the Aligner abstraction.
 """
 function multialign(sequences::Dict{String,String};
                     program::String = "muscle-fast",
@@ -121,11 +181,7 @@ function best_base(nc::NucleotideCounter)
 end
 
 function adjust_gaps!(nc::NucleotideCounter, excess::Int)
-    if excess > 0
-        nc.gap = excess
-    else
-        nc.gap = 0
-    end
+    nc.gap = excess > 0 ? excess : 0
     nc
 end
 
@@ -234,8 +290,6 @@ end
     align_affine(ref, query; gap_open=-6, gap_extend=-1, mismatch=-3, match_score=1) -> Alignment
 
 Global alignment with affine gap penalties (BWA-like defaults).
-Delegates to BioAlignments.pairalign; returns aligned strings with gaps for downstream use.
-
 The gap penalty convention is: gap of length k costs `gap_open + (k-1)*gap_extend`.
 BioAlignments uses `bio_gap_open + k*gap_extend`, so we adjust accordingly.
 """

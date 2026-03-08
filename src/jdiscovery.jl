@@ -29,13 +29,12 @@ function discover_j_genes(
     candidates = JCandidate[]
     namer = NameGenerator()
 
+    j_groups = Tuple{String, DataFrame}[]
     for gdf in groupby(table, :j_call)
         gene = String(first(gdf.j_call))
         isempty(gene) && continue
-
         exact_group = gdf[gdf.J_errors .== 0, :]
         nrow(exact_group) < J_MIN_EXACT && continue
-
         j_seqs = if hasproperty(gdf, :j_sequence_alignment)
             filter(!isempty, String.(replace.(
                 coalesce.(exact_group.j_sequence_alignment, ""), "-" => "")))
@@ -43,7 +42,15 @@ function discover_j_genes(
             String[]
         end
         isempty(j_seqs) && continue
-
+        push!(j_groups, (gene, gdf))
+    end
+    n_genes = length(j_groups)
+    prog = Progress(n_genes; dt = 1, desc = "Aligning J genes: ", barlen = 40)
+    for (gene, gdf) in j_groups
+        next!(prog; showvalues = [(:gene, gene)])
+        exact_group = gdf[gdf.J_errors .== 0, :]
+        j_seqs = filter(!isempty, String.(replace.(
+            coalesce.(exact_group.j_sequence_alignment, ""), "-" => "")))
         cons = iterative_consensus(j_seqs;
             program=config.multialign_program,
             threshold=config.consensus_threshold / 100,
