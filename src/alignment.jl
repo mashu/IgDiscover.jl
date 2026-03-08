@@ -46,29 +46,30 @@ function detect_muscle_version()
     DETECTED_MUSCLE_VERSION[] !== nothing && return DETECTED_MUSCLE_VERSION[]
     # v3: "MUSCLE v3.8.31 by Robert C. Edgar"
     # v5: "muscle 5.1.xxx" or "muscle 5.2"
-    buf = IOBuffer()
-    result = run(pipeline(`muscle -version`, stderr=devnull, stdout=buf); ignorestatus=true)
-    output = String(take!(buf))
-    if success(result) && !isempty(output)
-        if occursin(r"muscle\s+5\.", output)
-            DETECTED_MUSCLE_VERSION[] = MuscleV5()
-            MUSCLE_CMD[] = "muscle"
-            @info "Detected MUSCLE v5"
-        else
-            DETECTED_MUSCLE_VERSION[] = MuscleV3()
-            MUSCLE_CMD[] = "muscle"
-            @info "Detected MUSCLE v3 (muscle)"
+    # Use Sys.which to avoid running missing commands; ignorestatus so non-zero exit still returns output.
+    if Sys.which("muscle") !== nothing
+        output = read(pipeline(ignorestatus(`muscle -version`), stderr=devnull), String)
+        if !isempty(output)
+            if occursin(r"muscle\s+5\.", output)
+                DETECTED_MUSCLE_VERSION[] = MuscleV5()
+                MUSCLE_CMD[] = "muscle"
+                @info "Detected MUSCLE v5"
+            else
+                DETECTED_MUSCLE_VERSION[] = MuscleV3()
+                MUSCLE_CMD[] = "muscle"
+                @info "Detected MUSCLE v3 (muscle)"
+            end
+            return DETECTED_MUSCLE_VERSION[]
         end
-        return DETECTED_MUSCLE_VERSION[]
     end
-    buf3 = IOBuffer()
-    result3 = run(pipeline(`muscle3 -version`, stderr=devnull, stdout=buf3); ignorestatus=true)
-    output3 = String(take!(buf3))
-    if success(result3) && !isempty(output3)
-        DETECTED_MUSCLE_VERSION[] = MuscleV3()
-        MUSCLE_CMD[] = "muscle3"
-        @info "Detected MUSCLE v3 (muscle3)"
-        return DETECTED_MUSCLE_VERSION[]
+    if Sys.which("muscle3") !== nothing
+        output3 = read(pipeline(ignorestatus(`muscle3 -version`), stderr=devnull), String)
+        if !isempty(output3)
+            DETECTED_MUSCLE_VERSION[] = MuscleV3()
+            MUSCLE_CMD[] = "muscle3"
+            @info "Detected MUSCLE v3 (muscle3)"
+            return DETECTED_MUSCLE_VERSION[]
+        end
     end
     error("MUSCLE not found. Install 'muscle' or 'muscle3' (e.g. conda install -c bioconda muscle).")
 end
@@ -267,9 +268,10 @@ function iterative_consensus(sequences::Vector{String};
                              program::String = "muscle-medium",
                              threshold::Float64 = 0.6,
                              subsample_size::Int = 200,
-                             maximum_subsample_size::Int = 1600)
+                             maximum_subsample_size::Int = 1600,
+                             rng::Random.AbstractRNG = Random.GLOBAL_RNG)
     while true
-        sample = reservoir_sample(sequences, subsample_size)
+        sample = reservoir_sample(sequences, subsample_size; rng = rng)
         seqs = Dict(string(i) => s for (i, s) in enumerate(sample))
         aligned = multialign(seqs; program = program)
         cons = strip(consensus_sequence(aligned; threshold = threshold), 'N')
@@ -282,16 +284,17 @@ function iterative_consensus(sequences::Vector{String};
 end
 
 """
-    reservoir_sample(population, k) -> Vector
+    reservoir_sample(population, k; rng=Random.GLOBAL_RNG) -> Vector
 
 Reservoir sampling: return at most k randomly chosen elements from population.
 """
-function reservoir_sample(population::AbstractVector{T}, k::Int) where T
+function reservoir_sample(population::AbstractVector{T}, k::Int;
+                         rng::Random.AbstractRNG = Random.GLOBAL_RNG) where T
     n = length(population)
     k >= n && return copy(population)
     sample = population[1:k]
     for i in (k+1):n
-        j = rand(1:i)
+        j = rand(rng, 1:i)
         if j <= k
             sample[j] = population[i]
         end

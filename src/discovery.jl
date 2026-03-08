@@ -77,9 +77,14 @@ end
 
 # ─── Helpers ───
 
-function set_discovery_seed!(gene::String, base_seed::Int)
+"""Deterministic seed for a gene (used for RNG when running discovery in parallel)."""
+function gene_seed(gene::String, base_seed::Int)
     h = bytes2hex(sha256(Vector{UInt8}(codeunits(gene))))[end-7:end]
-    Random.seed!(parse(UInt32, h; base=16) + base_seed)
+    parse(UInt32, h; base=16) + base_seed
+end
+
+function set_discovery_seed!(gene::String, base_seed::Int)
+    Random.seed!(gene_seed(gene, base_seed))
 end
 
 function compute_group_stats(
@@ -109,13 +114,15 @@ function compute_group_stats(
               shared_ratio, clono, unique_bc)
 end
 
-function sibling_consensus(gene::String, group::DataFrame, params::DiscoveryParams)
+function sibling_consensus(gene::String, group::DataFrame, params::DiscoveryParams;
+                           rng::Random.AbstractRNG = Random.GLOBAL_RNG)
     seqs = filter(!isempty, String.(group.V_nt))
     isempty(seqs) && return ""
     cons = iterative_consensus(seqs;
         program=params.multialign_program,
         threshold=params.consensus_threshold / 100,
-        maximum_subsample_size=params.downsample)
+        maximum_subsample_size=params.downsample,
+        rng=rng)
     if haskey(params.database, gene)
         dbseq = params.database[gene]
         (startswith(cons, dbseq) || startswith(dbseq, cons)) && return dbseq
@@ -167,8 +174,14 @@ end
 
 # ─── Discovery for a single gene ───
 
-function discover_gene(gene::String, assignments::DataFrame, params::DiscoveryParams)
-    set_discovery_seed!(gene, params.seed)
+function discover_gene(gene::String, assignments::DataFrame, params::DiscoveryParams;
+                      rng::Union{Nothing, Random.AbstractRNG} = nothing)
+    if rng === nothing
+        set_discovery_seed!(gene, params.seed)
+        rng = Random.GLOBAL_RNG
+    else
+        Random.seed!(rng, gene_seed(gene, params.seed))
+    end
 
     cdr3_vals = filter(>(0), assignments.V_CDR3_start)
     cdr3_start_val = isempty(cdr3_vals) ? 0 : most_common(cdr3_vals)[1]
@@ -192,14 +205,14 @@ function discover_gene(gene::String, assignments::DataFrame, params::DiscoveryPa
         indices = findall(i -> left <= assignments.V_SHM[i] < right, 1:nrow(assignments))
         length(indices) < MINGROUPSIZE && continue
         group = assignments[indices, :]
-        seq = sibling_consensus(gene, group, params)
+        seq = sibling_consensus(gene, group, params; rng=rng)
         label = (left, right) == (0.0, 100.0) ? "all" :
             "$(left == floor(left) ? Int(left) : left)-$(right == floor(right) ? Int(right) : right)"
         push!(siblings, (seq, label, indices))
     end
 
     if params.do_cluster && nrow(assignments) >= MINGROUPSIZE
-        sample_idx = reservoir_sample(collect(1:nrow(assignments)), params.cluster_subsample_size)
+        sample_idx = reservoir_sample(collect(1:nrow(assignments)), params.cluster_subsample_size; rng=rng)
         _, cluster_ids = cluster_sequences(v_no_cdr3[sample_idx]; minsize=MINGROUPSIZE)
 
         groups_by_cl = Dict{Int,Vector{Int}}()
@@ -211,7 +224,7 @@ function discover_gene(gene::String, assignments::DataFrame, params::DiscoveryPa
         cl_num = 0
         for idx_list in values(groups_by_cl)
             length(idx_list) < MINGROUPSIZE && continue
-            seq = sibling_consensus(gene, assignments[idx_list, :], params)
+            seq = sibling_consensus(gene, assignments[idx_list, :], params; rng=rng)
             cl_num += 1
             push!(siblings, (seq, "cl$cl_num", idx_list))
         end
@@ -334,17 +347,41 @@ function discover_germline(
     gene_groups = [(String(first(gdf.v_call)), DataFrame(gdf)) for gdf in groupby(table, :v_call)
                    if !isempty(String(first(gdf.v_call))) && nrow(gdf) >= MINGROUPSIZE]
     n_genes = length(gene_groups)
-    prog = Progress(n_genes; dt = 1, desc = "Aligning V genes: ", barlen = 40)
-    for (gene, gdf) in gene_groups
-        next!(prog; showvalues = [(:gene, gene)])
-        for c in discover_gene(gene, gdf, params)
-            named = Candidate(
-                namer(c.name), c.source, c.chain, c.cluster,
-                c.cluster_size, c.Js, c.CDR3s, c.exact, c.full_exact, c.barcodes_exact,
-                c.Ds_exact, c.Js_exact, c.CDR3s_exact, c.clonotypes,
-                c.CDR3_exact_ratio, c.CDR3_shared_ratio, c.N_bases,
-                c.database_diff, c.database_changes, c.has_stop, c.CDR3_start, c.consensus)
-            push!(all_candidates, named)
+    nthreads = Threads.nthreads()
+    if nthreads > 1
+        # Parallel by gene (like Python igdiscover's multiprocessing.Pool), each gene gets its own RNG.
+        results = Vector{Vector{Candidate}}(undef, n_genes)
+        prog = Progress(n_genes; dt = 1, desc = "Aligning V genes ($nthreads threads): ", barlen = 40)
+        Threads.@threads for i in 1:n_genes
+            (gene, gdf) = gene_groups[i]
+            next!(prog; showvalues = [(:gene, gene)])
+            rng = Random.MersenneTwister(gene_seed(gene, params.seed))
+            results[i] = collect(discover_gene(gene, gdf, params; rng = rng))
+        end
+        for i in 1:n_genes
+            for c in results[i]
+                named = Candidate(
+                    namer(c.name), c.source, c.chain, c.cluster,
+                    c.cluster_size, c.Js, c.CDR3s, c.exact, c.full_exact, c.barcodes_exact,
+                    c.Ds_exact, c.Js_exact, c.CDR3s_exact, c.clonotypes,
+                    c.CDR3_exact_ratio, c.CDR3_shared_ratio, c.N_bases,
+                    c.database_diff, c.database_changes, c.has_stop, c.CDR3_start, c.consensus)
+                push!(all_candidates, named)
+            end
+        end
+    else
+        prog = Progress(n_genes; dt = 1, desc = "Aligning V genes: ", barlen = 40)
+        for (gene, gdf) in gene_groups
+            next!(prog; showvalues = [(:gene, gene)])
+            for c in discover_gene(gene, gdf, params)
+                named = Candidate(
+                    namer(c.name), c.source, c.chain, c.cluster,
+                    c.cluster_size, c.Js, c.CDR3s, c.exact, c.full_exact, c.barcodes_exact,
+                    c.Ds_exact, c.Js_exact, c.CDR3s_exact, c.clonotypes,
+                    c.CDR3_exact_ratio, c.CDR3_shared_ratio, c.N_bases,
+                    c.database_diff, c.database_changes, c.has_stop, c.CDR3_start, c.consensus)
+                push!(all_candidates, named)
+            end
         end
     end
 

@@ -1,7 +1,8 @@
 #!/usr/bin/env julia
 # Run IgDiscover pipeline on ERR1760498 (human Ig heavy chain, paired-end).
 #
-# Prerequisites: igblastn, makeblastdb, muscle, (optional) pear in PATH.
+# Prerequisites: igblastn, makeblastdb, muscle/muscle3, (optional) pear in PATH.
+# For faster V-gene discovery, run with threads: julia -t 4 --project=@. scripts/run_err1760498.jl
 # Downloads: IMGT human IGH V/D/J, ENA ERR1760498 FASTQ.
 
 using Pkg
