@@ -37,19 +37,40 @@ struct MuscleAligner{V <: MuscleVersion} <: Aligner
     variant::String   # "muscle", "muscle-fast", "muscle-medium"
 end
 
-# Version detection: run once, cache result
+# Version detection: run once, cache result. For v3, prefer "muscle", fall back to "muscle3".
 
 const DETECTED_MUSCLE_VERSION = Ref{Union{Nothing, MuscleVersion}}(nothing)
+const MUSCLE_CMD = Ref{String}("muscle")  # executable name used for alignment (muscle or muscle3)
 
 function detect_muscle_version()
     DETECTED_MUSCLE_VERSION[] !== nothing && return DETECTED_MUSCLE_VERSION[]
     # v3: "MUSCLE v3.8.31 by Robert C. Edgar"
     # v5: "muscle 5.1.xxx" or "muscle 5.2"
-    output = read(pipeline(`muscle -version`, stderr=devnull), String)
-    version = occursin(r"muscle\s+5\.", output) ? MuscleV5() : MuscleV3()
-    DETECTED_MUSCLE_VERSION[] = version
-    @info "Detected MUSCLE $(version isa MuscleV5 ? "v5" : "v3")"
-    version
+    buf = IOBuffer()
+    result = run(pipeline(`muscle -version`, stderr=devnull, stdout=buf); ignorestatus=true)
+    output = String(take!(buf))
+    if success(result) && !isempty(output)
+        if occursin(r"muscle\s+5\.", output)
+            DETECTED_MUSCLE_VERSION[] = MuscleV5()
+            MUSCLE_CMD[] = "muscle"
+            @info "Detected MUSCLE v5"
+        else
+            DETECTED_MUSCLE_VERSION[] = MuscleV3()
+            MUSCLE_CMD[] = "muscle"
+            @info "Detected MUSCLE v3 (muscle)"
+        end
+        return DETECTED_MUSCLE_VERSION[]
+    end
+    buf3 = IOBuffer()
+    result3 = run(pipeline(`muscle3 -version`, stderr=devnull, stdout=buf3); ignorestatus=true)
+    output3 = String(take!(buf3))
+    if success(result3) && !isempty(output3)
+        DETECTED_MUSCLE_VERSION[] = MuscleV3()
+        MUSCLE_CMD[] = "muscle3"
+        @info "Detected MUSCLE v3 (muscle3)"
+        return DETECTED_MUSCLE_VERSION[]
+    end
+    error("MUSCLE not found. Install 'muscle' or 'muscle3' (e.g. conda install -c bioconda muscle).")
 end
 
 function make_muscle_aligner(variant::String)
@@ -60,15 +81,16 @@ end
 # ─── MUSCLE v3: pipe-based, -maxiters, -diags (matches Python exactly) ───
 
 function run_align(a::MuscleAligner{MuscleV3}, fasta_str::String, ::Int)
+    exe = MUSCLE_CMD[]
     cmd = if a.variant == "muscle-fast"
         # Python: ["muscle", "-quiet", "-maxiters", "1", "-diags", "-in", "-", "-out", "-"]
-        `muscle -quiet -maxiters 1 -diags -in /dev/stdin -out /dev/stdout`
+        `$exe -quiet -maxiters 1 -diags -in /dev/stdin -out /dev/stdout`
     elseif a.variant == "muscle-medium"
         # Python: ["muscle", "-quiet", "-maxiters", "2", "-diags", "-in", "-", "-out", "-"]
-        `muscle -quiet -maxiters 2 -diags -in /dev/stdin -out /dev/stdout`
+        `$exe -quiet -maxiters 2 -diags -in /dev/stdin -out /dev/stdout`
     else
         # Python: ["muscle", "-quiet", "-in", "-", "-out", "-"]
-        `muscle -quiet -in /dev/stdin -out /dev/stdout`
+        `$exe -quiet -in /dev/stdin -out /dev/stdout`
     end
     read(pipeline(IOBuffer(fasta_str), cmd), String)
 end
