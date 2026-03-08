@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Parity](https://img.shields.io/badge/parity-verified-brightgreen.svg)](#parity-testing)
 
-A Julia port of [IgDiscover](https://gitlab.com/gkhlab/igdiscover22) for individualized V gene database construction from high-throughput antibody sequencing data.
+A reimplementation in Julia of [IgDiscover](https://gitlab.com/gkhlab/igdiscover22), with further development, for individualized V gene database construction from high-throughput antibody sequencing data.
 
 ## Quick Start
 

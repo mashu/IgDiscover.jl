@@ -1,6 +1,6 @@
 # IgDiscover.jl
 
-A Julia port of [IgDiscover](https://gitlab.com/gkhlab/igdiscover22) for individualized V gene database construction from high-throughput sequencing data.
+A reimplementation in Julia of [IgDiscover](https://gitlab.com/gkhlab/igdiscover22), with further development, for individualized V gene database construction from high-throughput sequencing data.
 
 ## Overview
 

@@ -1,4 +1,4 @@
-# CDR3 detection — ported from igdiscover/species.py
+# CDR3 detection — reimplementation of logic in igdiscover/species.py
 # Detects CDR3 start within V genes and CDR3 end within J genes.
 # Locus is dispatched via the Locus abstract type; string API converts via to_locus.
 
